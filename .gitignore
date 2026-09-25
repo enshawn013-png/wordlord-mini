@@ -1,0 +1,8 @@
+dist/
+node_modules/
+.DS_Store
+.swc
+*.local
+
+# 词表生成用的原始数据（65MB，不提交）
+.worddata/
