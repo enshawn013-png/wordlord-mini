@@ -6,3 +6,6 @@ node_modules/
 
 # 词表生成用的原始数据（65MB，不提交）
 .worddata/
+
+# 云函数的依赖（开发者工具上传时会「云端安装依赖」，不用提交）
+cloudfunctions/*/node_modules/

@@ -34,6 +34,18 @@ export default defineConfig<'webpack5'>(async (merge) => {
       enable: false
     },
     mini: {
+      // 构建开始时**不要**清空 dist。
+      // Taro 默认会在 setup 阶段把 dist 整个删掉（@tarojs/service/dist/platform-plugin-base/mini.js
+      // —— 只有 output.clean 显式为 false 时才跳过），而微信开发者工具开着的时候，
+      // 它监听到文件变化会自动重启小程序：正好落进 dist 被删空的那几秒，就会报
+      //   dist/app.json: 根据 project.config.json 中 miniprogramRoot 指定的小程序目录 dist/，
+      //   在该目录下未找到 app.json
+      // 然后整个模拟器白屏（生词本 Tab 点开就是一片白）。
+      // 不清空的话，构建期间 dist 里一直是上一次的完整产物，没有这个空窗期。
+      // 代价：删掉/改名页面后 dist 里会残留旧文件，那种时候手动 `npm run clean` 一次。
+      output: {
+        clean: false
+      },
       postcss: {
         pxtransform: {
           enable: true,

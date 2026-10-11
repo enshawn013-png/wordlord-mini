@@ -127,7 +127,7 @@ export function wordsFromCsv(text: string): ParseResult {
 
 /** 让用户从微信聊天记录里选一个 CSV 文件。取消选择返回 null。 */
 async function pickCsvFile(): Promise<{ path: string; name: string } | null> {
-  const res = await Taro.chooseMessageFile({ count: 1, type: 'file', extension: ['csv', 'txt'] })
+  const res = await Taro.chooseMessageFile({ count: 1, type: 'file', extension: ['csv'] })
   const file = res.tempFiles?.[0]
   if (!file) return null
   return { path: file.path, name: file.name || '' }
@@ -154,7 +154,35 @@ function bookTitleFromFileName(name: string): string {
 
 export interface ImportResult {
   book: UploadBookMeta
-  skipped: number
+}
+
+/** 词表里读不出词时的统一提示。 */
+function showNoWordsModal(tooFewColumns: number): void {
+  Taro.showModal({
+    title: '没有读到单词',
+    content: tooFewColumns
+      ? `有 ${tooFewColumns} 行不足 4 列。格式必须是：word,phonetic,pos,definition`
+      : '格式必须是：word,phonetic,pos,definition，且第一列是英文单词。',
+    showCancel: false,
+    confirmText: '知道了'
+  })
+}
+
+/** 存一本词书 + 成功/失败提示。存不下（超过 20 本）返回 null。 */
+function commitBook(title: string, words: Word[]): ImportResult | null {
+  const book = addUploadBook(title, words)
+  if (!book) {
+    Taro.showModal({
+      title: '上传的书太多了',
+      content: '「我的上传」最多放 20 本词书，先删掉几本再传。',
+      showCancel: false,
+      confirmText: '知道了'
+    })
+    return null
+  }
+
+  Taro.showToast({ title: `导入成功，共${book.count}个词`, icon: 'none', duration: 2000 })
+  return { book }
 }
 
 /**
@@ -188,43 +216,41 @@ export async function importCsvFromChat(): Promise<ImportResult | null> {
       return null
     }
 
-    const { words, skipped, tooFewColumns } = wordsFromCsv(text)
+    const { words, tooFewColumns } = wordsFromCsv(text)
 
     if (!words.length) {
       Taro.hideLoading()
-      Taro.showModal({
-        title: '没有读到单词',
-        content: tooFewColumns
-          ? `有 ${tooFewColumns} 行不足 4 列。列顺序必须是：word,phonetic,pos,definition`
-          : '请确认列顺序是：word,phonetic,pos,definition，且第一列是英文单词。',
-        showCancel: false,
-        confirmText: '知道了'
-      })
+      showNoWordsModal(tooFewColumns)
       return null
     }
 
-    const book = addUploadBook(bookTitleFromFileName(picked.name), words)
     Taro.hideLoading()
-
-    if (!book) {
-      Taro.showModal({
-        title: '上传的书太多了',
-        content: '「我的上传」最多放 20 本词书，先删掉几本再传。',
-        showCancel: false,
-        confirmText: '知道了'
-      })
-      return null
-    }
-
-    Taro.showToast({
-      title: `已导入《${book.title}》${book.count} 个词${skipped > 0 ? `，跳过 ${skipped} 行` : ''}`,
-      icon: 'none',
-      duration: 2000
-    })
-    return { book, skipped }
+    return commitBook(bookTitleFromFileName(picked.name), words)
   } catch (e) {
     Taro.hideLoading()
     Taro.showToast({ title: (e as Error).message || '导入失败', icon: 'none', duration: 2000 })
     return null
   }
+}
+
+/** 手动粘贴的一本词书叫什么：按日期命名，避免同一天多本重名。 */
+function pastedBookTitle(): string {
+  const d = new Date()
+  return `手动粘贴 ${d.getMonth() + 1}-${d.getDate()}`
+}
+
+/**
+ * 手动粘贴词表：把文本框里的原文解析成词条，存成「我的上传」里的一本词书。
+ * 格式和 CSV 完全一样（一词一行，逗号分隔 word,phonetic,pos,definition），
+ * 所以直接复用 wordsFromCsv。没读到词 / 存不下时返回 null（已弹窗提示）。
+ */
+export function importPastedText(text: string): ImportResult | null {
+  const { words, tooFewColumns } = wordsFromCsv(text)
+
+  if (!words.length) {
+    showNoWordsModal(tooFewColumns)
+    return null
+  }
+
+  return commitBook(pastedBookTitle(), words)
 }

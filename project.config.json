@@ -1,5 +1,6 @@
 {
   "miniprogramRoot": "dist/",
+  "cloudfunctionRoot": "cloudfunctions/",
   "projectname": "wordlord-mini",
   "description": "单词君 - 微信小程序版",
   "appid": "wxf46a75f64921bdca",
@@ -20,7 +21,7 @@
     "localPlugins": false,
     "disableUseStrict": false,
     "useCompilerPlugins": false,
-    "condition": false,
+    "condition": true,
     "babelSetting": {
       "ignore": [],
       "disablePlugins": [],
@@ -28,10 +29,13 @@
     }
   },
   "compileType": "miniprogram",
-  "simulatorPluginLibVersion": {},
+  "simulatorPluginLibVersion": {
+    "wxext14566970e7e9f62": "2.27.3"
+  },
   "packOptions": {
     "ignore": [],
     "include": []
   },
-  "editorSetting": {}
+  "editorSetting": {},
+  "projectArchitecture": "multiPlatform"
 }

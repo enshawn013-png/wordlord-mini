@@ -7,6 +7,7 @@ import { LEVELS, LevelKey, wordsOfLevel } from '../../data/words'
 import { bookTitle, bookWords, summarize } from '../../store/books'
 import { getMastered } from '../../store/storage'
 import { STYLE } from '../../theme'
+import { bottomSafePx, navBarHeightPx, topGapPx } from '../../utils/metrics'
 
 /**
  * 第二层：一本词书的四个档次。
@@ -29,35 +30,47 @@ export default function LevelsScreen() {
     })
   }, [bookId])
 
-  // 空词书（上传失败或刚被删掉）不该停在这一层
+  // 空词书（上传失败或刚被删掉）不该停在这一层。
+  // 空状态不进 ScrollView：它靠 STYLE.empty 的 flex:1 在整屏里居中，进了滚动区就居中不了。
   if (!rows.some((r) => r.total > 0)) {
     return (
       <View style={STYLE.container}>
-        <NavBar title={title} back />
         <View style={STYLE.empty}>
           <Text style={STYLE.emptyText}>这本词表里没有词。</Text>
         </View>
+        <NavBar title={title} back />
       </View>
     )
   }
 
   return (
     <View style={STYLE.container}>
-      <NavBar title={title} back />
-
+      {/* 内容从导航栏底下穿过去（玻璃才糊得到东西），所以留出导航栏的高度 */}
       <ScrollView scrollY style={STYLE.list}>
-        {rows.map((row) => (
-          <ListRow
-            key={row.key}
-            title={row.label}
-            meta={row.total === 0 ? '这本词表里没有这一档的词' : `共 ${row.total} 词 · 还剩 ${row.remain} 词`}
-            onOpen={() => {
-              if (row.total === 0) return
-              Taro.navigateTo({ url: `/pages/reader/index?bookId=${bookId}&level=${row.key}` })
-            }}
-          />
-        ))}
+        <View
+          style={{
+            // 导航栏高度 + 24rpx：顶部内容不许贴着导航栏；底部按安全高度收（这页没有 Tab 栏）
+            paddingTop: `${navBarHeightPx() + topGapPx()}px`,
+            paddingBottom: `${bottomSafePx()}px`
+          }}
+        >
+          {rows.map((row) => (
+            <ListRow
+              key={row.key}
+              title={row.label}
+              meta={
+                row.total === 0 ? '这本词表里没有这一档的词' : `共 ${row.total} 词 · 还剩 ${row.remain} 词`
+              }
+              onOpen={() => {
+                if (row.total === 0) return
+                Taro.navigateTo({ url: `/pages/reader/index?bookId=${bookId}&level=${row.key}` })
+              }}
+            />
+          ))}
+        </View>
       </ScrollView>
+
+      <NavBar title={title} back />
     </View>
   )
 }

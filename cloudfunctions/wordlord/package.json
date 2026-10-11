@@ -1,0 +1,9 @@
+{
+  "name": "wordlord",
+  "version": "1.0.0",
+  "description": "单词君云函数：登录换 openid + 读写用户云端数据",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}
