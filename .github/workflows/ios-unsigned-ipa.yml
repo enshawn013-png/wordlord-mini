@@ -53,6 +53,21 @@ jobs:
           npx cap add ios
           npx cap sync ios
 
+      # 全屏 + 状态栏白字：深绿底色上用默认黑字会看不清；
+      # UIViewControllerBasedStatusBarAppearance=false 让 plist 里的样式生效。
+      - name: Patch iOS Info.plist (full screen + light status bar)
+        run: |
+          PLIST=ios/App/App/Info.plist
+          /usr/libexec/PlistBuddy -c "Delete :UIViewControllerBasedStatusBarAppearance" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIViewControllerBasedStatusBarAppearance bool false" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Delete :UIStatusBarStyle" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIStatusBarStyle string UIStatusBarStyleLightContent" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Delete :UIRequiresFullScreen" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIRequiresFullScreen bool true" "$PLIST"
+          echo "--- Info.plist 关键项 ---"
+          /usr/libexec/PlistBuddy -c "Print :UIViewControllerBasedStatusBarAppearance" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :UIStatusBarStyle" "$PLIST"
+
       - name: Build unsigned .app
         run: |
           cd ios/App
