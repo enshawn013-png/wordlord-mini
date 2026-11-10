@@ -47,6 +47,29 @@ function windowInfo() {
     } catch {
       // 取不到就按 iPhone 的常见值兜底，别让整个页面因为换算失败白屏
     }
+    /**
+     * H5 / iOS 壳（iPhone 16 灵动岛、全面屏 Home 条）：
+     * Taro 在 H5 里给不到 statusBarHeight / safeArea，统一按 0 处理 →
+     * 导航栏会钻到灵动岛底下。这里直接读 CSS 的 env(safe-area-inset-*)。
+     * 需要 index.html 的 viewport 带 `viewport-fit=cover`，否则 env() 恒为 0。
+     */
+    if (process.env.TARO_ENV === 'h5' && typeof document !== 'undefined' && document.body) {
+      try {
+        const probe = document.createElement('div')
+        probe.style.cssText =
+          'position:fixed;left:-9999px;top:0;width:0;height:0;' +
+          'padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);'
+        document.body.appendChild(probe)
+        const cs = getComputedStyle(probe)
+        const safeTop = parseFloat(cs.paddingTop) || 0
+        const safeBottom = parseFloat(cs.paddingBottom) || 0
+        probe.remove()
+        if (safeTop > 0) statusBarHeight = safeTop
+        if (safeBottom > 0) inset = safeBottom
+      } catch {
+        // 老浏览器没有 env()：保持 0，退化成普通 H5
+      }
+    }
     cachedWindowInfo = { width, height, statusBarHeight, inset }
   }
   return cachedWindowInfo
