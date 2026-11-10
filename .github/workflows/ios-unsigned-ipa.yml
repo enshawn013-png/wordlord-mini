@@ -36,6 +36,12 @@ jobs:
       - name: Build H5 bundle
         run: npm run build:h5
 
+      # Taro 的 postcss 只处理 .css 里的 rpx，组件里的内联 rpx（fontSize: '224rpx'）
+      # 会原样进包 —— 在 H5/iOS 壳里是非法单位，浏览器丢弃后整页字号退回继承值，
+      # 表现为「放大 2 倍、左边被切」。这一步把内联 rpx 换算成 rem。
+      - name: Fix inline rpx for H5
+        run: node scripts/fix-h5-rpx.mjs
+
       - name: Sanity check webDir
         run: |
           test -f dist/index.html || { echo "dist/index.html missing"; exit 1; }
