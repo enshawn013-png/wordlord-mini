@@ -181,7 +181,9 @@ function commitBook(title: string, words: Word[]): ImportResult | null {
     return null
   }
 
-  Taro.showToast({ title: `导入成功，共${book.count}个词`, icon: 'none', duration: 2000 })
+  // 短提示：Toast 超过 7 个汉字就会被挤成两行。
+  // 「存了哪些词」不需要说 —— 新的那本词书马上就出现在下面的列表里，那才是回执。
+  Taro.showToast({ title: '导入成功', icon: 'none', duration: 1500 })
   return { book }
 }
 

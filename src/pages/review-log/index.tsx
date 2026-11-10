@@ -2,8 +2,10 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { ScrollView, Text, View } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
+import { PageCurtain } from '../../components/page-curtain'
 import { MarkBadge } from '../../components/mark-circle'
 import { NavBar } from '../../components/nav-bar'
+import { PageHeader } from '../../components/page-header'
 import { getReviewLog, getVocabPool, PoolWord } from '../../store/storage'
 import { COLOR, FONT, PAGE_PAD, PRESS, STYLE } from '../../theme'
 import { bottomSafePx, navBarHeightPx, rpxToPx, topGapPx } from '../../utils/metrics'
@@ -47,6 +49,7 @@ export default function ReviewLogScreen() {
 
   return (
     <View style={STYLE.container}>
+      <PageCurtain label="复习记录" kicker="REVIEW LOG" />
       <ScrollView scrollY style={STYLE.list}>
         <View
           style={{
@@ -54,7 +57,8 @@ export default function ReviewLogScreen() {
             paddingBottom: `${bottomSafePx() + rpxToPx(24)}px`
           }}
         >
-          <View style={styles.statsBar}>
+          <PageHeader kicker="REVIEW LOG" title="复习记录" sub="按标记等级倒着看，从最不熟的开始" />
+<View style={styles.statsBar}>
             <Text style={styles.statsText}>
               生词库共 {pool.length} 个词 · 复习过 {reviewedCount} 个
             </Text>
@@ -76,7 +80,7 @@ export default function ReviewLogScreen() {
               >
                 <MarkBadge markCount={level} />
                 <View style={styles.rowText}>
-                  <Text style={styles.rowTitle}>标记 {level} 次</Text>
+                  <Text style={styles.rowTitle}>等级 {level}/7{level === 7 ? ' · 最不熟' : level === 1 ? ' · 差一步' : ''}</Text>
                   <Text style={styles.rowMeta}>
                     {empty ? '这一档还没有词' : `${count} 个词`}
                   </Text>
@@ -103,13 +107,13 @@ const styles: Record<string, CSSProperties> = {
   },
   statsText: {
     fontSize: FONT.meta,
-    color: COLOR.secondary
+    color: COLOR.onGroundSoft
   },
   hintText: {
     marginTop: '8rpx',
     fontSize: FONT.pageNo,
     lineHeight: '32rpx',
-    color: COLOR.secondary
+    color: COLOR.onGroundSoft
   },
   // 每一档一行：左边一颗该档的标记圆圈（颜色和所有页面一致），右边灰色箭头
   row: {

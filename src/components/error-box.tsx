@@ -81,7 +81,7 @@ const styles: Record<string, CSSProperties> = {
     paddingTop: '32rpx',
     paddingBottom: '32rpx',
     borderRadius: '24rpx',
-    backgroundColor: '#FFF1F0'
+    backgroundColor: COLOR.dangerFill
   },
   errorTitle: {
     fontSize: FONT.definition,

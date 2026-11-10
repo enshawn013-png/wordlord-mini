@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单词君 · UI 方向</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px 28px 56px;
+    background: #ECEAE4;
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    color: #17170F;
+    -webkit-font-smoothing: antialiased;
+  }
+  .board { max-width: 1180px; margin: 0 auto; }
+  .board > h1 {
+    font-size: 15px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase;
+    color: #6B6A60; margin: 0 0 6px;
+  }
+  .board > p.lede { margin: 0 0 34px; font-size: 14px; line-height: 1.6; color: #6B6A60; max-width: 62ch; }
+
+  .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; align-items: start; }
+  .col > .label { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .col > .label .idx { font: 600 12px/1 ui-monospace, "SF Mono", monospace; letter-spacing: .1em; color: #8A8880; }
+  .col > .label .name { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+  .col > .note { margin: 12px 2px 0; font-size: 12.5px; line-height: 1.65; color: #6B6A60; }
+
+  /* 手机画框 */
+  .phone {
+    width: 100%; border-radius: 22px; overflow: hidden; position: relative;
+    box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 18px 40px -24px rgba(0,0,0,.35);
+  }
+  .screen { padding: 0; }
+
+  /* ============ A 墨与纸 ============ */
+  .A .phone { background: #F4F1EA; }
+  .A { --ink: #17170F; --sub: #6B6A60; --hair: rgba(23,23,15,.12); --accent: #C8452B; }
+  .A .status { height: 26px; }
+  .A .top { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 22px 0; }
+  .A .micro { font: 600 9.5px/1 ui-monospace, "SF Mono", monospace; letter-spacing: .18em; text-transform: uppercase; color: var(--sub); }
+  .A .rule { height: 1px; background: var(--hair); margin: 12px 22px 0; }
+  .A .cardpad { padding: 26px 22px 0; }
+  .A .word { font-family: "Songti SC", "Source Han Serif SC", Georgia, serif; font-size: 40px; line-height: 1.06; letter-spacing: -.02em; color: var(--ink); }
+  .A .phon { margin-top: 10px; font: 400 12px/1.4 ui-monospace, "SF Mono", monospace; color: var(--sub); letter-spacing: .01em; }
+  .A .def { margin-top: 18px; font-size: 14.5px; line-height: 1.72; color: #33322A; }
+  .A .def em { font-style: normal; color: var(--accent); }
+  .A .ladder { margin: 24px 22px 0; display: flex; gap: 4px; }
+  .A .step { flex: 1; height: 3px; background: rgba(23,23,15,.10); }
+  .A .step.on { background: var(--accent); }
+  .A .laddercap { display: flex; justify-content: space-between; margin: 8px 22px 0; }
+  .A .btns { display: flex; gap: 10px; padding: 26px 22px 24px; }
+  .A .btn { flex: 1; height: 46px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
+  .A .btn.ghost { border: 1px solid var(--hair); color: var(--ink); }
+  .A .btn.solid { background: var(--ink); color: #F4F1EA; }
+  .A .home { border-top: 1px solid var(--hair); padding: 20px 22px 22px; }
+  .A .hrow { display: flex; justify-content: space-between; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--hair); }
+  .A .hrow:last-child { border-bottom: 0; }
+  .A .hk { font-size: 12px; color: var(--sub); letter-spacing: .04em; }
+  .A .hv { font-family: "Songti SC", Georgia, serif; font-size: 17px; }
+  .A .hv .unit { font-family: ui-monospace, monospace; font-size: 11px; color: var(--sub); margin-left: 6px; }
+
+  /* ============ B 夜航 ============ */
+  .B .phone { background: #0A0B0D; }
+  .B { --ink: #ECEDEE; --sub: #868C96; --hair: rgba(255,255,255,.09); --accent: #E9B872; }
+  .B .status { height: 26px; }
+  .B .top { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 22px 0; }
+  .B .micro { font: 500 9.5px/1 ui-monospace, "SF Mono", monospace; letter-spacing: .16em; text-transform: uppercase; color: var(--sub); }
+  .B .cardpad { padding: 30px 22px 0; }
+  .B .word { font-size: 38px; line-height: 1.08; letter-spacing: -.03em; font-weight: 500; color: var(--ink); }
+  .B .phon { margin-top: 12px; font: 400 12px/1.4 ui-monospace, monospace; color: var(--sub); }
+  .B .def { margin-top: 20px; font-size: 14px; line-height: 1.75; color: #C3C7CE; }
+  .B .chip { display: inline-flex; align-items: center; gap: 7px; margin-top: 24px; padding: 7px 12px; border: 1px solid rgba(233,184,114,.32); border-radius: 4px; }
+  .B .chip .n { font: 600 11px/1 ui-monospace, monospace; color: var(--accent); letter-spacing: .08em; }
+  .B .chip .t { font-size: 11px; color: #B9A588; letter-spacing: .06em; }
+  .B .btns { display: flex; gap: 10px; padding: 26px 22px 24px; }
+  .B .btn { flex: 1; height: 46px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 13.5px; font-weight: 500; letter-spacing: .02em; }
+  .B .btn.ghost { border: 1px solid var(--hair); color: #C7CBD2; }
+  .B .btn.solid { background: var(--accent); color: #241A0C; font-weight: 600; }
+  .B .home { border-top: 1px solid var(--hair); padding: 18px 22px 22px; }
+  .B .hgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hair); }
+  .B .hcell { background: #0A0B0D; padding: 14px 0 12px; }
+  .B .hcell .k { font: 500 9.5px/1 ui-monospace, monospace; letter-spacing: .14em; color: var(--sub); text-transform: uppercase; }
+  .B .hcell .v { margin-top: 8px; font-size: 24px; letter-spacing: -.02em; color: var(--ink); }
+  .B .hcell .v span { font-size: 11px; color: var(--sub); margin-left: 4px; }
+
+  /* ============ C 瑞士网格 ============ */
+  .C .phone { background: #FFFFFF; }
+  .C { --ink: #0A0A0A; --sub: #75757A; --hair: #E6E6E6; --accent: #FF4A1C; }
+  .C .status { height: 26px; }
+  .C .top { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 22px 0; }
+  .C .micro { font: 600 9.5px/1 ui-monospace, "SF Mono", monospace; letter-spacing: .2em; text-transform: uppercase; color: var(--sub); }
+  .C .cardpad { padding: 28px 22px 0; }
+  .C .word { font-size: 41px; line-height: 1.02; letter-spacing: -.045em; font-weight: 700; color: var(--ink); }
+  .C .phon { margin-top: 12px; font: 400 12px/1.4 ui-monospace, monospace; color: var(--sub); }
+  .C .def { margin-top: 20px; font-size: 14px; line-height: 1.7; color: #26262A; }
+  .C .scale { margin: 26px 22px 0; display: flex; align-items: flex-end; gap: 3px; height: 26px; }
+  .C .bar { flex: 1; background: #EDEDED; }
+  .C .bar.on { background: var(--accent); }
+  .C .btns { display: flex; gap: 8px; padding: 26px 22px 24px; }
+  .C .btn { flex: 1; height: 46px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .C .btn.ghost { border: 1px solid var(--ink); color: var(--ink); }
+  .C .btn.solid { background: var(--ink); color: #fff; }
+  .C .home { border-top: 1px solid var(--hair); padding: 18px 22px 22px; }
+  .C .hline { display: flex; justify-content: space-between; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--hair); }
+  .C .hline:last-child { border-bottom: 0; }
+  .C .hk { font: 600 10px/1 ui-monospace, monospace; letter-spacing: .14em; text-transform: uppercase; color: var(--sub); }
+  .C .hv { font: 700 19px/1 ui-monospace, monospace; letter-spacing: -.02em; }
+  .C .hv .u { font: 400 10px/1 ui-monospace, monospace; color: var(--sub); margin-left: 5px; }
+
+  .swatch { display: flex; gap: 6px; margin-top: 14px; }
+  .sw { width: 26px; height: 26px; border-radius: 3px; border: 1px solid rgba(0,0,0,.08); }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="board">
+  <h1>单词君 · UI 方向提案</h1>
+  <p class="lede">三套都去掉：玻璃拟态、背景光斑、噪点纹理、emoji 图标、弹跳动画。留下的只有排版、留白、一条细分隔线和**一个**强调色。</p>
+
+  <div class="cols">
+
+    <!-- A -->
+    <div class="col A">
+      <div class="label"><span class="idx">A</span><span class="name">墨与纸 · Editorial</span></div>
+      <div class="phone">
+        <div class="screen">
+          <div class="status"></div>
+          <div class="top"><span class="micro">LEVEL 02 / 07</span><span class="micro">04 — 07</span></div>
+          <div class="rule"></div>
+          <div class="cardpad">
+            <div class="word">deliberate</div>
+            <div class="phon">/dɪˈlɪbərət/ · adj.</div>
+            <div class="def">深思熟虑的；故意的。<em>刻意</em>放慢，是为了看清。</div>
+          </div>
+          <div class="ladder">
+            <div class="step on"></div><div class="step on"></div><div class="step on"></div>
+            <div class="step on"></div><div class="step on"></div><div class="step"></div><div class="step"></div>
+          </div>
+          <div class="laddercap"><span class="micro">还差 2 次答对</span><span class="micro">明天再见</span></div>
+          <div class="btns">
+            <div class="btn ghost">不认识</div>
+            <div class="btn solid">认识</div>
+          </div>
+          <div class="home">
+            <div class="hrow"><span class="hk">今日</span><span class="hv">12<span class="unit">/ 34</span></span></div>
+            <div class="hrow"><span class="hk">生词库</span><span class="hv">86<span class="unit">词</span></span></div>
+            <div class="hrow"><span class="hk">距考试</span><span class="hv">37<span class="unit">天</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="sw" style="background:#F4F1EA"></div><div class="sw" style="background:#17170F"></div>
+        <div class="sw" style="background:#6B6A60"></div><div class="sw" style="background:#C8452B"></div>
+      </div>
+      <div class="note">衬线大标题 + 等宽小标签，像一本印出来的书。强调色只出现在等级条和"还差几次"上。适合长时间阅读，最不容易"AI 味"。</div>
+    </div>
+
+    <!-- B -->
+    <div class="col B">
+      <div class="label"><span class="idx">B</span><span class="name">夜航 · Precision Dark</span></div>
+      <div class="phone">
+        <div class="screen">
+          <div class="status"></div>
+          <div class="top"><span class="micro">LEVEL 02 / 07</span><span class="micro">04 — 07</span></div>
+          <div class="cardpad">
+            <div class="word">deliberate</div>
+            <div class="phon">/dɪˈlɪbərət/ · adj.</div>
+            <div class="def">深思熟虑的；故意的。刻意放慢，是为了看清。</div>
+            <div class="chip"><span class="n">02</span><span class="t">再答对 2 次 掌握</span></div>
+          </div>
+          <div class="btns">
+            <div class="btn ghost">不认识</div>
+            <div class="btn solid">认识</div>
+          </div>
+          <div class="home">
+            <div class="hgrid">
+              <div class="hcell"><div class="k">Today</div><div class="v">12<span>/34</span></div></div>
+              <div class="hcell"><div class="k">Pool</div><div class="v">86<span>词</span></div></div>
+              <div class="hcell"><div class="k">Exam</div><div class="v">37<span>天</span></div></div>
+              <div class="hcell"><div class="k">Streak</div><div class="v">9<span>天</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="sw" style="background:#0A0B0D"></div><div class="sw" style="background:#ECEDEE"></div>
+        <div class="sw" style="background:#868C96"></div><div class="sw" style="background:#E9B872"></div>
+      </div>
+      <div class="note">深色、极细发丝线、琥珀色单一强调。夜里背单词不刺眼，气质接近 Linear / Raycast。要做深色模式的话这套直接就是。</div>
+    </div>
+
+    <!-- C -->
+    <div class="col C">
+      <div class="label"><span class="idx">C</span><span class="name">瑞士网格 · Swiss Grid</span></div>
+      <div class="phone">
+        <div class="screen">
+          <div class="status"></div>
+          <div class="top"><span class="micro">Level 02 / 07</span><span class="micro">04 — 07</span></div>
+          <div class="cardpad">
+            <div class="word">deliberate</div>
+            <div class="phon">/dɪˈlɪbərət/ · adj.</div>
+            <div class="def">深思熟虑的；故意的。刻意放慢，是为了看清。</div>
+          </div>
+          <div class="scale">
+            <div class="bar on" style="height:22px"></div><div class="bar on" style="height:19px"></div>
+            <div class="bar on" style="height:16px"></div><div class="bar on" style="height:13px"></div>
+            <div class="bar on" style="height:10px"></div><div class="bar" style="height:7px"></div>
+            <div class="bar" style="height:4px"></div>
+          </div>
+          <div class="btns">
+            <div class="btn ghost">不认识</div>
+            <div class="btn solid">认识</div>
+          </div>
+          <div class="home">
+            <div class="hline"><span class="hk">Today</span><span class="hv">12<span class="u">/ 34</span></span></div>
+            <div class="hline"><span class="hk">Pool</span><span class="hv">86<span class="u">words</span></span></div>
+            <div class="hline"><span class="hk">Exam in</span><span class="hv">37<span class="u">days</span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="sw" style="background:#FFFFFF"></div><div class="sw" style="background:#0A0A0A"></div>
+        <div class="sw" style="background:#75757A"></div><div class="sw" style="background:#FF4A1C"></div>
+      </div>
+      <div class="note">纯黑白 + 等宽数字 + 全大写微标签，等级用柱高表示。最"工程师/平面设计"的一套，接近 Vercel。缺点是偏冷，可能显得学习压力大。</div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

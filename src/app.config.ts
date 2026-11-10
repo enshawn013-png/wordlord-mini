@@ -33,14 +33,32 @@ export default defineAppConfig({
     'pages/review/index',
     'pages/review-log/index',
     'pages/review-level/index',
-    'pages/vocab-all/index'
+    'pages/vocab-all/index',
+    // 查词（R5）：首页「查词」那一行的落点。放在数组最后是因为它是个工具页，
+    // 启动页永远是第一项（pages/home/index），顺序不影响导航。
+    'pages/search/index',
+    // 设置（2026-11）：只管操作 —— 惯用手、字号、震动。
+    'pages/settings/index'
   ],
   // 声明这个小程序要用云开发（用云能力必须写，否则开发者工具里没有云开发入口）。
   // 真正的初始化在 app.ts 里调 wx.cloud.init，环境 ID 在 src/cloud/config.ts。
   cloud: true,
   window: {
     backgroundTextStyle: 'light',
-    navigationBarBackgroundColor: '#FFFFFF',
+    /**
+     * 2026-11：用户手机上「往下拉 / 内容比屏幕短」时，底下会露出一大块**黑色**。
+     *
+     * 那是 page 的默认底色（默认跟随系统深色），不是页面自己画的。
+     * 三个颜色一起给：
+     *   backgroundColor       → 页面本身的底色（内容不够高时露出来的就是它）
+     *   backgroundColorTop    → 顶部下拉回弹时露出的颜色
+     *   backgroundColorBottom → 底部上拉回弹时露出的颜色
+     * 全部填暖米白，和 STYLE.container 的渐变首尾同色，滚到边上分不出边界。
+     */
+    backgroundColor: '#F4F1E9',
+    backgroundColorTop: '#F4F1E9',
+    backgroundColorBottom: '#F4F1E9',
+    navigationBarBackgroundColor: '#F4F1E9',
     navigationBarTitleText: '单词君',
     navigationBarTextStyle: 'black'
   }

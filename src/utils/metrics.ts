@@ -35,8 +35,15 @@ function windowInfo() {
       width = info.windowWidth || 375
       height = info.windowHeight || 667
       statusBarHeight = info.statusBarHeight || 20
-      const bottom = info.safeArea ? info.safeArea.bottom : info.screenHeight
-      inset = Math.max(info.screenHeight - bottom, 0)
+      /**
+       * ⚠️ 2026-11 修：H5 / PWA 里 `getWindowInfo()` 可能返回 `safeArea.bottom = 0`（或干脆没有
+       * safeArea），于是 inset 被算成整个屏高（844px）—— 底部 Tab 栏的占位 spacer 撑到满屏，
+       * 那条玻璃栏的 backdrop-filter 把整页内容糊成一片。
+       * 两道保险：① bottom 为 0 时退回 screenHeight；② inset 夹在 0~60px（Home 条最多 34px）。
+       */
+      const rawBottom = info.safeArea && info.safeArea.bottom
+      const bottom = rawBottom && rawBottom > 0 ? rawBottom : info.screenHeight
+      inset = Math.min(Math.max(info.screenHeight - bottom, 0), 60)
     } catch {
       // 取不到就按 iPhone 的常见值兜底，别让整个页面因为换算失败白屏
     }
@@ -58,7 +65,14 @@ export function rpxToPx(rpx: number): number {
  * 那就得靠 48rpx 兜底。所有贴屏幕底的东西都用这个值，别直接写 BOTTOM_PAD。
  */
 export function bottomSafePx(): number {
-  return Math.max(rpxToPx(48), bottomInsetPx())
+  /**
+   * ⚠️ 2026-11 修（PWA / H5 里 Tab 栏把整页糊住的那个 bug）：
+   * H5 里平台给的 safeArea 不可靠，`bottomInsetPx()` 可能返回整屏高度（844px），
+   * 于是 Tab 栏底部的占位 spacer 撑满一屏、玻璃栏的 backdrop-filter 把内容糊成一片。
+   * 这里硬夹一个上限 80px（Home 指示条最多 34px，80 已经非常宽松）——
+   * 不管平台报什么，都不会再把布局撑炸。
+   */
+  return Math.min(Math.max(rpxToPx(48), bottomInsetPx()), 80)
 }
 
 /** 顶部内容距导航栏的最小间距（用户 2026-09-28 定的 24rpx） */

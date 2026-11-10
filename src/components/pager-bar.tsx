@@ -79,7 +79,7 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: 'center',
     paddingLeft: '48rpx',
     paddingRight: '48rpx',
-    borderRadius: '44rpx'
+    borderRadius: '6rpx'
   },
   /** 「下一页」：黑底实心白字（用户 2026-09-28 选的：主操作不玻璃化） */
   capsuleDark: {

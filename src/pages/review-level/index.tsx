@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { ScrollView, Text, View } from '@tarojs/components'
 import { useDidShow, useRouter } from '@tarojs/taro'
+import { PageCurtain } from '../../components/page-curtain'
 import { NavBar } from '../../components/nav-bar'
+import { PageHeader } from '../../components/page-header'
 import {
   getVocabPool,
   markReviewed,
@@ -10,7 +12,7 @@ import {
   pickRandomByRecency,
   PoolWord
 } from '../../store/storage'
-import { COLOR, FONT, PAGE_PAD, PRESS, STYLE } from '../../theme'
+import { COLOR, FONT, FONT_STACK, PAGE_PAD, PRESS, STYLE } from '../../theme'
 import { bottomSafePx, navBarHeightPx, rpxToPx, topGapPx } from '../../utils/metrics'
 
 /**
@@ -60,6 +62,26 @@ export default function ReviewLevelScreen() {
   const [words, setWords] = useState<PoolWord[]>(() => levelWords(level))
   const [pick, setPick] = useState<PoolWord | null>(null)
   const [revealed, setRevealed] = useState(false)
+  /**
+   * 抽中的这个词已经「我会了」（2026-11 全站口径：先记录 → 展开答案 → 再翻下一个）。
+   * 以前点完当场把卡片收起来，用户没机会看清自己刚判的是什么、也没机会后悔；
+   * 现在卡片留着、释义摊开，按钮只剩「下一个」。
+   */
+  const [masteredPick, setMasteredPick] = useState(false)
+  /**
+   * 同上，但要一份同步的 ref：`masteredPick` 是 state，同一个 tick 里连点两下时
+   * 第二下读到的还是 false —— 会 masterWord + markReviewed 记两遍。
+   * 守卫一律读 ref（和卡片版 / 复习页同一套做法）。
+   */
+  const masteredPickRef = useRef(false)
+  /** 点按钮时飘出来的小 emoji（抽查 🎲 / 我会了 ✨），和卡片版同一套 */
+  const [burst, setBurst] = useState<{ id: number; emoji: string } | null>(null)
+
+  /** 飘一下：700ms 后自动清掉（动画长度见 app.css 的 burstUp） */
+  const fireBurst = (emoji: string) => {
+    setBurst({ id: Date.now(), emoji })
+    setTimeout(() => setBurst(null), 720)
+  }
   const [limit, setLimit] = useState(CHUNK)
 
   // 从复习页 / 翻书页回来时重新读（掌握、标记都会动这一档）
@@ -69,15 +91,21 @@ export default function ReviewLevelScreen() {
   const draw = () => {
     setPick(pickRandomByRecency(levelWords(level)))
     setRevealed(false)
+    masteredPickRef.current = false
+    setMasteredPick(false)
+    fireBurst('§')
   }
 
-  /** 抽中的词会了：掌握 + 记一次复习 → 它离开生词库、进「熟练掌握词汇」 */
+  /** 抽中的词会了：掌握 + 记一次复习 → 它离开生词库、进「熟练掌握词汇」。
+   *  记录完**停在原地**（释义摊开、按钮变「下一个」），给用户看一眼的机会。 */
   const handleMaster = () => {
-    if (!pick) return
+    if (!pick || masteredPickRef.current) return
+    masteredPickRef.current = true
+    fireBurst('✓')
     masterWord(pick.word)
     markReviewed(pick.word)
-    setPick(null)
-    setRevealed(false)
+    setRevealed(true)
+    setMasteredPick(true)
     setWords(levelWords(level))
   }
 
@@ -86,6 +114,7 @@ export default function ReviewLevelScreen() {
 
   return (
     <View style={STYLE.container}>
+      <PageCurtain label="标记档位" kicker="MARK LEVEL" />
       <ScrollView scrollY style={STYLE.list}>
         <View
           style={{
@@ -93,45 +122,90 @@ export default function ReviewLevelScreen() {
             paddingBottom: `${bottomSafePx() + rpxToPx(24)}px`
           }}
         >
+          <PageHeader kicker="MARK LEVEL" title="标记档位" sub="这一档的词全在这儿，可以抽查" ghost="档" />
           {/*
             ① 随机抽查。用户说得很清楚：**这一页主要是「一眼看到这一档的词」，抽查只是辅助**。
             所以没抽的时候它只有一行高（标题 + 说明 + 一个小按钮），不抢版面；
             抽出来了才展开成一张卡。
           */}
           {pick ? (
-            <View className="glass glass-card" style={styles.drawCard}>
-              <Text style={styles.drawLabel}>随机抽查</Text>
-              <Text
-                className="text-break"
-                style={styles.drawWord}
-                onClick={() => setRevealed(true)}
-              >
+            <View
+              className="glass glass-card"
+              style={styles.drawCard}
+              onClick={() => setRevealed(true)}
+            >
+              {burst ? (
+                <Text key={burst.id} style={styles.burst}>
+                  {burst.emoji}
+                </Text>
+              ) : null}
+
+              {/* 芯片行：和卡片版同一个位置、同一种小标签 */}
+              <View style={styles.chipRow}>
+                <View style={styles.chip}>
+                  <Text style={styles.chipText}>抽查 · 第 {level} 档</Text>
+                </View>
+                <Text style={styles.chipSide}>本档 {words.length} 个</Text>
+              </View>
+
+              {/* 词：整张卡唯一的大字 */}
+              <Text className="text-break" style={styles.drawWord}>
                 {pick.word}
               </Text>
+              {revealed && meta ? <Text style={styles.drawMeta}>{meta}</Text> : null}
+
               {revealed ? (
-                <>
-                  {meta ? <Text style={styles.drawMeta}>{meta}</Text> : null}
+                <View style={styles.answer}>
+                  <View style={styles.divider} />
                   <Text className="text-break" style={styles.drawDefinition}>
                     {pick.definition}
                   </Text>
-                </>
+                  {/* 判定回执：只回答「这一下判成什么了」 */}
+                  {masteredPick ? (
+                    <Text style={styles.masteredHint}>已进「熟练掌握词汇」 · 以后不再出现</Text>
+                  ) : null}
+                </View>
               ) : (
-                <Text style={styles.drawHintText} onClick={() => setRevealed(true)}>
-                  点单词看释义
-                </Text>
+                <Text style={styles.drawHintText}>轻点卡片看释义</Text>
               )}
 
+              {/* 未作答：换一个 / 我会了；已作答：只剩「下一个」（全站统一口径，见卡片版注释） */}
               <View style={styles.drawBtns}>
-                <View {...PRESS} className="glass glass-pill" style={styles.drawBtn} onClick={draw}>
-                  <Text style={styles.drawBtnText}>再抽一个</Text>
-                </View>
-                <View
-                  {...PRESS}
-                  style={{ ...styles.drawPrimary, marginLeft: '24rpx' }}
-                  onClick={handleMaster}
-                >
-                  <Text style={styles.drawPrimaryText}>我会了</Text>
-                </View>
+                {masteredPick ? (
+                  <View
+                    hoverClass="press"
+                    style={{ ...styles.btn, ...styles.btnPrimary, flex: 1 }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      draw()
+                    }}
+                  >
+                    <Text style={styles.btnPrimaryText}>下一个</Text>
+                  </View>
+                ) : (
+                  <>
+                    <View
+                      hoverClass="press"
+                      style={{ ...styles.btn, ...styles.btnGhost }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        draw()
+                      }}
+                    >
+                      <Text style={styles.btnGhostText}>换一个</Text>
+                    </View>
+                    <View
+                      hoverClass="press"
+                      style={{ ...styles.btn, ...styles.btnPrimary }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleMaster()
+                      }}
+                    >
+                      <Text style={styles.btnPrimaryText}>我会了</Text>
+                    </View>
+                  </>
+                )}
               </View>
             </View>
           ) : (
@@ -156,7 +230,7 @@ export default function ReviewLevelScreen() {
             <Text style={styles.hintText}>最近在翻书页标记的排在最前面</Text>
           </View>
 
-          {words.length === 0 ? (
+          {words.length === 0 && !pick ? (
             <View style={styles.emptyBox}>
               <Text style={STYLE.emptyText}>
                 这一档暂时没有词。回复习记录看看别的档，或者在翻书页多标几个词。
@@ -213,12 +287,14 @@ export default function ReviewLevelScreen() {
 const styles: Record<string, CSSProperties> = {
   // 抽查卡：居中排，比普通行宽松一点，但比卡片式复习页「轻」
   drawCard: {
+    position: 'relative',
     marginLeft: PAGE_PAD,
     marginRight: PAGE_PAD,
-    paddingLeft: '32rpx',
-    paddingRight: '32rpx',
-    paddingTop: '32rpx',
-    paddingBottom: '32rpx',
+    paddingLeft: '44rpx',
+    paddingRight: '44rpx',
+    paddingTop: '34rpx',
+    paddingBottom: '38rpx',
+    borderRadius: '12rpx',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center'
@@ -255,17 +331,20 @@ const styles: Record<string, CSSProperties> = {
     lineHeight: '30rpx',
     color: COLOR.secondary
   },
+  // 黑底小按钮：视觉 64rpx，热区靠上下各 12rpx 内边距 + 负外边距补到 88rpx
   drawSmallBtn: {
     flexShrink: 0,
     marginLeft: '24rpx',
+    marginTop: '-12rpx',
+    marginBottom: '-12rpx',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     paddingLeft: '32rpx',
     paddingRight: '32rpx',
-    paddingTop: '16rpx',
-    paddingBottom: '16rpx',
-    borderRadius: '32rpx',
+    paddingTop: '12rpx',
+    paddingBottom: '12rpx',
+    borderRadius: '6rpx',
     backgroundColor: COLOR.black
   },
   drawSmallBtnText: {
@@ -273,37 +352,121 @@ const styles: Record<string, CSSProperties> = {
     color: COLOR.onDark
   },
   drawWord: {
-    marginTop: '20rpx',
-    fontSize: '52rpx',
-    lineHeight: '68rpx',
-    fontWeight: '700',
-    color: COLOR.text,
-    textAlign: 'center'
+    marginTop: '28rpx',
+    fontSize: '68rpx',
+    lineHeight: '86rpx',
+    fontWeight: '600',
+    color: COLOR.text
   },
   drawMeta: {
-    marginTop: '16rpx',
-    fontSize: FONT.meta,
-    lineHeight: '36rpx',
-    color: COLOR.secondary,
-    textAlign: 'center'
+    marginTop: '10rpx',
+    fontSize: '24rpx',
+    lineHeight: '34rpx',
+    color: COLOR.secondary
   },
   drawDefinition: {
-    marginTop: '16rpx',
-    fontSize: FONT.definition,
-    lineHeight: '40rpx',
-    color: COLOR.body,
-    textAlign: 'center'
+    fontSize: '34rpx',
+    lineHeight: '52rpx',
+    color: COLOR.text
   },
   drawHintText: {
-    marginTop: '20rpx',
-    fontSize: FONT.meta,
+    marginTop: '24rpx',
+    fontSize: FONT.pageNo,
     lineHeight: '36rpx',
-    color: COLOR.secondary,
-    textAlign: 'center'
+    color: COLOR.secondary
+  },
+  /** 判定回执：22rpx 暖色小字（和卡片版的 verdictLine 同一条语言） */
+  masteredHint: {
+    marginTop: '16rpx',
+    fontSize: FONT.pageNo,
+    lineHeight: '32rpx',
+    fontWeight: '600',
+    color: COLOR.warm,
+    animation: 'labelIn 180ms ease both'
+  },
+  // 芯片行：和卡片版同一个位置与语言
+  chipRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  chip: {
+    height: '40rpx',
+    paddingLeft: '16rpx',
+    paddingRight: '16rpx',
+    borderRadius: '4rpx',
+    backgroundColor: COLOR.warmSoft,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  chipText: {
+    fontSize: '20rpx',
+    lineHeight: '40rpx',
+    letterSpacing: '1rpx',
+    color: COLOR.warm
+  },
+  chipSide: {
+    fontSize: '20rpx',
+    color: COLOR.secondary
+  },
+  answer: {
+    display: 'flex',
+    flexDirection: 'column',
+    animation: 'fadeUp 320ms cubic-bezier(.22,.61,.36,1) both'
+  },
+  divider: {
+    marginTop: '26rpx',
+    marginBottom: '22rpx',
+    height: '1rpx',
+    backgroundColor: COLOR.track
+  },
+  // 两个等宽按钮：左描边（换一个）右实心（我会了），和卡片版一致
+  btn: {
+    flex: 1,
+    height: '100rpx',
+    borderRadius: '6rpx',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  btnGhost: {
+    marginRight: '20rpx',
+    border: `1rpx solid ${COLOR.track}`,
+    backgroundColor: COLOR.paperRaised
+  },
+  btnGhostText: {
+    fontSize: '30rpx',
+    color: COLOR.body
+  },
+  btnPrimary: {
+    backgroundColor: COLOR.black
+  },
+  btnPrimaryText: {
+    fontSize: '30rpx',
+    fontWeight: '600',
+    color: COLOR.onDark
+  },
+  // 飘出来的小 emoji
+  burst: {
+    position: 'absolute',
+    top: '34%',
+    left: '50%',
+    marginLeft: '-60rpx',
+    width: '120rpx',
+    textAlign: 'center',
+    fontFamily: 'Georgia, Times New Roman, serif',
+    fontSize: '40rpx',
+    lineHeight: '52rpx',
+    color: COLOR.warm,
+    animation: 'burstUp 700ms ease-out',
+    pointerEvents: 'none',
+    zIndex: 20
   },
   // 两个按钮并排，整行铺开（卡片自带左右内边距，所以 alignSelf 撑满即可）
   drawBtns: {
-    marginTop: '24rpx',
+    marginTop: '32rpx',
     alignSelf: 'stretch',
     display: 'flex',
     flexDirection: 'row',
@@ -316,7 +479,7 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: 'center',
     paddingTop: '20rpx',
     paddingBottom: '20rpx',
-    borderRadius: '40rpx'
+    borderRadius: '6rpx'
   },
   drawBtnText: {
     fontSize: FONT.definition,
@@ -331,7 +494,7 @@ const styles: Record<string, CSSProperties> = {
     justifyContent: 'center',
     paddingTop: '20rpx',
     paddingBottom: '20rpx',
-    borderRadius: '40rpx',
+    borderRadius: '6rpx',
     backgroundColor: COLOR.black
   },
   drawPrimaryText: {
@@ -379,8 +542,10 @@ const styles: Record<string, CSSProperties> = {
     flexDirection: 'column'
   },
   word: {
-    fontSize: FONT.word,
-    fontWeight: '700',
+    fontFamily: FONT_STACK.serif,
+    fontSize: '40rpx',
+    lineHeight: '50rpx',
+    fontWeight: '400',
     color: COLOR.text
   },
   meta: {
@@ -410,7 +575,7 @@ const styles: Record<string, CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     height: '88rpx',
-    borderRadius: '44rpx'
+    borderRadius: '6rpx'
   },
   moreBtnText: {
     fontSize: FONT.definition,

@@ -1,16 +1,4 @@
-/*
- * 全局样式。两件事。
- */
-
-/* ------------------------------------------------------------------
- * 1. 把微信原生 <button> 的默认外观抹掉
- *
- * 原生 button 自带一圈 ::after 描边 + 5px 圆角 + 左右 17px 内边距，
- * ::after 是伪元素，行内 style 改不到，只能在这里全局抹掉。
- *
- * 目前全项目只有「我的」页的头像按钮用了原生 Button
- * （因为 open-type="chooseAvatar" 必须是原生 button，不能用 View 代替）。
- * ------------------------------------------------------------------ */
+/* WORDLORD / 孔版手帐：奶油纸、深墨、朱砂。 */
 
 button::after {
   border: none;
@@ -22,99 +10,327 @@ button {
   line-height: normal;
 }
 
-/* ------------------------------------------------------------------
- * 2. 液态玻璃（Liquid Glass）配方 —— 2026-09-28 加
- *
- * 为什么不写在行内 style 里：行内样式走 Taro 的**样式白名单**（@tarojs/runtime 的
- * styleProperties），只能写那些属性；写在 CSS 文件里更自由，也不受白名单约束。
- *
- * ⚠️ **这个文件里的 px 会被 Taro 按 1:1 换成 rpx**（designWidth 750 的约定：
- * 源码里的 1px = 产物里的 1rpx = 屏幕上的 0.5pt）。所以**想要 20rpx 就写 20px**，
- * 别按字面理解 —— 写 `blur(10px)` 出来的是 `blur(10rpx)`（实测过）。
- * 不想被换算的可以写大写的 `PX`，Taro 会跳过。
- *
- * ⚠️ **`-webkit-backdrop-filter` 会被 WXSS 编译器整个丢掉**（实测：只有标准属性活到了
- * 产物里），所以这里不写前缀了 —— 于是 **iOS 18 之前的老系统上玻璃只会是「半透明白」，
- * 不糊**，Android 部分机型同理。开发者工具（Chromium）和 iOS 18+ 都正常。
- * 这是可接受的退化：底色本来就是半透明白，只是少了那层模糊。
- *
- * ⚠️ **blur 只对「背后真有东西」的元素有意义**：导航栏、底部 Tab 栏、翻书页的
- * 「上一页」胶囊是**浮在滚动内容上面**的（见 theme.ts 的 STYLE.topBar / bottomBar），
- * 单词会从它们底下滚过去，才看得到毛玻璃。列表卡片背后只有页面渐变，
- * 看起来就是一层半透明白 —— 这是正常的，不是没生效。
- * ------------------------------------------------------------------ */
+page {
+  background-color: #12312d;
+  background-image: linear-gradient(180deg, #12312d 0%, #0f2a26 50%, #0c2320 100%);
+  background-attachment: fixed;
+  color: #17150f;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
 
+/* 页面容器透明，让纸面渐变透上来 */
 .glass {
-  background-color: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px) saturate(180%);
+  background-color: transparent;
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-/* 悬浮的玻璃条：导航栏贴顶，下沿一道极细的白色高光 */
 .glass-bar-top {
-  border-bottom-width: 1rpx;
-  border-bottom-style: solid;
-  border-bottom-color: rgba(255, 255, 255, 0.6);
+  background-color: #12312d;
+  box-shadow: 0 8rpx 24rpx rgba(78, 60, 34, 0.05);
 }
 
-/* 悬浮的玻璃条：底部 Tab 栏，上沿高光 */
 .glass-bar-bottom {
-  border-top-width: 1rpx;
-  border-top-style: solid;
-  border-top-color: rgba(255, 255, 255, 0.6);
+  background-color: #fbfaf3;
+  border-top: 2rpx solid rgba(18, 49, 45, 0.10);
+  box-shadow: none;
 }
 
-/* 玻璃卡片：列表行、生词本的行、「我的」的账号块 */
+/* 白块：直角、无阴影，靠颜色和细线分隔（海报的做法） */
 .glass-card {
-  border-width: 1rpx;
-  border-style: solid;
-  border-color: rgba(255, 255, 255, 0.6);
-  border-radius: 24rpx;
-  /* 极淡的投影：只用来把卡片从背景里托起来一点，不要厚重 */
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.05);
+  background-color: #fbfaf3;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
-/* 玻璃胶囊：「上一页」、未点过的「我会了」 */
 .glass-pill {
-  border-width: 1rpx;
-  border-style: solid;
-  border-color: rgba(255, 255, 255, 0.6);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.05);
+  background-color: rgba(255, 243, 228, 0.16);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
-
-/* ------------------------------------------------------------------
- * 3. 长字符串换行 —— 防止撑出容器、跑到屏幕外
- *
- * 用户自己传的词书**书名就是文件名**，昵称也是随手填的，都可能是没有空格的长串
- * （`CET6_2024_final_v3_backup.csv`）。微信里 overflow 默认 visible，
- * 一长串会直接冲出卡片、冲出屏幕右边被裁掉。
- *
- * 为什么是 `overflow-wrap: anywhere` 而不是 `word-break: break-all`：
- * - break-all 会**从中间劈开正常的英文单词**（`environ/mental`），英文释义会变得很碎；
- *   anywhere 只在「这个字放不下这一行」时才断，正常排版不受影响。
- * - anywhere 还会**参与 min-content 宽度计算**，所以能治 flex 子项的经典溢出：
- *   flex 子项默认 min-width:auto = 内容最小宽度，一长串会把卡片顶宽、冲出屏幕。
- *   配一个 word-wrap 是给老引擎的退路（等价于 overflow-wrap: break-word）。
- *
- * 用 class 写是因为 Taro 的样式白名单里**没有 wordBreak / overflowWrap**
- * （行内写会被静默丢掉），只能走 CSS 文件。
- * ------------------------------------------------------------------ */
 
 .text-break {
   overflow-wrap: anywhere;
   word-wrap: break-word;
 }
 
-/* ------------------------------------------------------------------
- * 4. 触屏按下态 —— 2026-10 加
- *
- * 微信里 `:hover` 和 `cursor: pointer` **完全没有效果**（写了也不报错，纯浪费），
- * 触屏唯一可靠的反馈是内置组件的 `hover-class`。所以全站可点元素都摊上
- * `theme.ts` 的 `PRESS`（hoverClass: 'press'），按下时整块淡下去一下。
- *
- * 只改 opacity、不写动画：按下反馈要「立刻」，任何 transition 都会让它变迟钝；
- * 而且只动 opacity 不会触发重排，真机上最省。
- * ------------------------------------------------------------------ */
+.serif {
+  font-family: Georgia, "Songti SC", "Times New Roman", serif;
+}
+
+/* 小字标签：全大写 + 字距，是版式里的「栏目名」
+   ⚠️ 字号不许低于 20rpx：小程序不跟随系统字体缩放，19rpx 在真机上就是看不清（UI 体检 MEDIUM） */
+.kicker {
+  font-size: 20rpx;
+  letter-spacing: 3rpx;
+  text-transform: uppercase;
+  color: #736c5b;
+}
+
+.rise {
+  animation: riseIn 520ms cubic-bezier(.22, 1, 0.36, 1) backwards;
+}
 
 .press {
-  opacity: 0.55;
+  opacity: 0.94;
+  transform: scale(0.968);
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms ease;
+}
+
+/* 所有颜色类变化（选中 / 开关 / 切换 / 高亮）都走同一条补间 */
+/*
+ * 只补间这三样：全部能在合成层或低成本重绘里完成。
+ * 之前把 color / border-color 也放进来了，长列表里任何一次状态变化都会触发文字重绘。
+ */
+view {
+  transition-property: transform, opacity, background-color;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.speak-body {
+  width: 8rpx;
+  height: 16rpx;
+  background-color: #736c5b;
+  border-top-left-radius: 3rpx;
+  border-bottom-left-radius: 3rpx;
+}
+
+.speak-horn {
+  width: 0;
+  height: 0;
+  border-top: 12rpx solid transparent;
+  border-bottom: 12rpx solid transparent;
+  border-right: 14rpx solid #736c5b;
+  margin-left: -1rpx;
+}
+
+/*
+ * 动效语言（2026-11 重做）
+ * ─────────────────────────────────────────────
+ * 一条曲线走到底：cubic-bezier(.22,1,.36,1)（指数缓出），快进慢收。
+ * 三种动作，别的一概不用：
+ *   ① riseIn  —— 静态内容入场：上浮 24rpx + 放大 .985，错峰 60ms 递进
+ *   ② stampIn —— 主按钮 / 印章：从 1.3 倍砸下来，带回弹
+ *   ③ sweepIn —— 线条 / 色块：从左端长出来
+ * 时长只有三档：200ms（反馈）、420ms（面板）、620ms（入场）。
+ */
+
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(28rpx) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20rpx) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* 排版型入场：只沿基线滑动，不缩放、不旋转（大牌版式的手法） */
+@keyframes slideOnBaseline {
+  from { opacity: 0; transform: translateY(40rpx); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* 大卡片入场：从下方抬起、带一点点歪，落定时扶正 */
+@keyframes cardEnter {
+  0% { opacity: 0; transform: translateY(70rpx) scale(0.90) rotate(-2.4deg); }
+  62% { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
+}
+
+/*
+ * 有机形呼吸（性能版）：
+ * 原来动的是 border-radius —— 那是每帧重新计算轮廓 + 重绘整块，低端机必掉帧。
+ * 现在只动 transform（合成层上完成），形状固定、看起来一样在呼吸。
+ */
+@keyframes blobMorph {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(5deg) scale(1.05); }
+  100% { transform: rotate(-4deg) scale(0.98); }
+}
+
+/* 圆环：从外向内收，像镜头对焦 */
+@keyframes ringIn {
+  from { opacity: 0; transform: scale(1.35) rotate(-24deg); }
+  to { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+
+/* 逐字母落版 */
+@keyframes charIn {
+  0% { opacity: 0; transform: translateY(26rpx) rotate(-7deg) scale(0.86); }
+  60% { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
+}
+
+/* 等级柱从底部长出来 */
+@keyframes barGrow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+/* 箭头轻轻来回 */
+@keyframes arrowNudge {
+  0%, 100% { transform: skewX(9deg) translateX(0); }
+  50% { transform: skewX(9deg) translateX(8rpx); }
+}
+
+/*
+ * 页面开幕 · 丝滑拉门 + 艺术字页名（进页面时，0.88 秒）
+ * 丝滑的关键：只有一条连续缓动（cubic-bezier(.66,0,.18,1)），无停顿帧。
+ * 起步极缓（门完整可见）→ 中段加速 → 收尾缓缓落定。
+ */
+
+/* 拉门：上门向上、下门向下，各走出一屏 + 自身高度 */
+@keyframes curtainOpenUp {
+  from { transform: translateY(0); }
+  to { transform: translateY(-112%); }
+}
+@keyframes curtainOpenDown {
+  from { transform: translateY(0); }
+  to { transform: translateY(112%); }
+}
+
+/* 页名：浮现 → 停稳 → 随开门淡出并微微放大 */
+@keyframes curtainTitle {
+  0% { opacity: 0; transform: rotate(-3deg) scale(1.1); }
+  22% { opacity: 1; transform: rotate(-3deg) scale(1); }
+  72% { opacity: 1; transform: rotate(-3deg) scale(1); }
+  100% { opacity: 0; transform: rotate(-3deg) scale(1.05); }
+}
+
+/* 合缝线：先亮着，随门拉开整体淡出 */
+@keyframes curtainSeam {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(0); }
+}
+
+/* 印章冲击波：一圈向外散开 */
+@keyframes ringBurst {
+  0% { opacity: 0.9; transform: scale(0.25); }
+  100% { opacity: 0; transform: scale(1.55); }
+}
+
+/* 斜纹从左刷出来 */
+@keyframes stripeIn {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+/* 大弧从内向外展开 */
+@keyframes arcIn {
+  from { opacity: 0; transform: scale(0.55) rotate(-18deg); }
+  to { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+
+/* 判定印章：砸下来 → 停 → 淡出 */
+@keyframes stampSlam {
+  0% { opacity: 0; transform: rotate(-24deg) scale(2.1); }
+  22% { opacity: 1; transform: rotate(-11deg) scale(0.94); }
+  32% { transform: rotate(-11deg) scale(1.04); }
+  40% { transform: rotate(-11deg) scale(1); }
+  74% { opacity: 1; transform: rotate(-11deg) scale(1); }
+  100% { opacity: 0; transform: rotate(-11deg) scale(1.06); }
+}
+
+@keyframes stampIn {
+  0% { opacity: 0; transform: scale(1.32) rotate(-12deg); }
+  55% { opacity: 1; transform: scale(0.94) rotate(2deg); }
+  78% { transform: scale(1.03) rotate(-1deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+
+@keyframes sweepIn {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@keyframes inkIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes floatY {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6rpx); }
+}
+
+/* 判定回执：从按钮位置往上飘，飘得比原来远，慢一半 */
+@keyframes burstUp {
+  0% { opacity: 0; transform: translateY(0) scale(0.7) rotate(-6deg); }
+  18% { opacity: 1; transform: translateY(-18rpx) scale(1.08) rotate(2deg); }
+  100% { opacity: 0; transform: translateY(-130rpx) scale(0.94) rotate(-3deg); }
+}
+
+/* 释义面板：从底部抬起 + 轻微放大，落定时不回弹（避免和卡片的滑动打架） */
+@keyframes sheetUp {
+  from { opacity: 0; transform: translateY(56rpx) scale(0.965); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ripple {
+  0% { opacity: 0.45; transform: scale(0.4); }
+  100% { opacity: 0; transform: scale(6); }
+}
+
+@keyframes labelIn {
+  from { opacity: 0; transform: translateY(6rpx); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes popIn {
+  0% { opacity: 0; transform: scale(0.94); }
+  62% { opacity: 1; transform: scale(1.015); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes cardIn {
+  from { opacity: 0; transform: translateX(36rpx) rotate(1deg); }
+  to { opacity: 1; transform: translateX(0) rotate(0deg); }
+}
+
+@keyframes quipFade {
+  0% { opacity: 0; transform: translateY(8rpx); }
+  10% { opacity: 1; transform: translateY(0); }
+  74% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-8rpx); }
+}
+
+@keyframes cardNudgeYes {
+  0% { transform: translate3d(0, 0, 0); }
+  28% { transform: translate3d(0, -6rpx, 0); }
+  58% { transform: translate3d(0, 3rpx, 0); }
+  80% { transform: translate3d(0, -1rpx, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes cardNudgeNo {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  20% { transform: translate3d(-7rpx, 0, 0) rotate(-0.8deg); }
+  44% { transform: translate3d(5rpx, 0, 0) rotate(0.6deg); }
+  68% { transform: translate3d(-3rpx, 0, 0) rotate(-0.3deg); }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+}
+
+@keyframes sheetSpringYes {
+  0% { opacity: 0; transform: translateY(52rpx) scale(0.96); }
+  50% { opacity: 1; transform: translateY(-6rpx) scale(1.004); }
+  76% { transform: translateY(3rpx) scale(0.999); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes sheetBounceNo {
+  0% { opacity: 0; transform: translateY(52rpx) rotate(-1.2deg) scale(0.96); }
+  46% { opacity: 1; transform: translateY(-8rpx) rotate(0.7deg) scale(1.005); }
+  74% { transform: translateY(3rpx) rotate(-0.2deg) scale(1); }
+  100% { opacity: 1; transform: translateY(0) rotate(0deg) scale(1); }
+}
+
+@keyframes verdictPop {
+  0% { opacity: 0; transform: translateY(8rpx) scale(0.94); }
+  62% { opacity: 1; transform: translateY(-1rpx) scale(1.02); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }

@@ -9,3 +9,7 @@ node_modules/
 
 # 云函数的依赖（开发者工具上传时会「云端安装依赖」，不用提交）
 cloudfunctions/*/node_modules/
+
+# P0/P1 断言脚本的编译产物（源在 p0-check/，跑之前用
+# `npx tsc -p p0-check/tsconfig.json` 生成）
+p0-check/lib/

@@ -2,18 +2,27 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Input, Picker, ScrollView, Text, View } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
+import { PageCurtain } from '../../components/page-curtain'
+import { Chip } from '../../components/chip'
 import { NavBar } from '../../components/nav-bar'
-import { BUILTIN_BOOK, BUILTIN_BOOK_ID, LEVELS, LevelKey, levelLabel } from '../../data/words'
-import { bookTitle } from '../../store/books'
+import { PageHeader } from '../../components/page-header'
+import { BigAction } from '../../components/big-action'
+import { LEVELS, LevelKey, levelLabel } from '../../data/words'
+import { allBooks, bookTitle, mainBookId } from '../../store/books'
 import {
   addDaysToDate,
   bookScope,
+  checkBuffer,
   clearPlan,
   daysUntil,
+  firstRoundDeadline,
+  getDailyGoal,
+  getExamDate,
   getPlanStatus,
-  getUploadBooks,
   loadTodayCounts,
+  planAdvice,
   PlanStatus,
+  setExamDate,
   setPlan,
   shortDate,
   todayISO
@@ -53,27 +62,32 @@ import { bottomSafePx, navBarHeightPx, rpxToPx, topGapPx } from '../../utils/met
  * 另外 `setPlan()` 现在**同一本书同一档会保留起点和分母**：用户是在「调整」（改日期 /
  * 改每天的量），不是「重开」——否则调一次日期，领先/落后就归零、历史全丢。
  *
+ * ## 2026-11 第四轮：计划完全由用户定（缓冲期降级成提示）
+ *
+ * 用户的要求很直接：**填多少就是多少，别替我做决定**。所以：
+ *
+ * - `pickDeadline()` 不再拒绝、日期 Picker 不设 `end`、`createPlan()` 提交前不再拦 ——
+ *   上面第 1 条里那块「可行性提示 + 一键放宽」整块删掉了（它的落点也是缓冲期反推量）；
+ * - `storage.planAdvice()` 只做除法（剩余 ÷ 每天 → 完成日），不改用户填的量；
+ *   `respectsBuffer` 恒为 `true`，谁也别再拿它做拦截；
+ * - `checkBuffer()` 仍然保留 —— 它是**提示**（「会晚 7 天」）用的，不是闸门。
+ *
  * ⚠️ 所有**文案里的日期**都走 `shortDate()`：预测出来的完成日期很容易跨年，
  * 只写 `03-12` 会被读成「今年 3 月」（那是过去）。
  */
 
-/** 每天要背超过这个数就提示「偏大」（背单词的常识区间，不是官方数字） */
-const HEAVY_PER_DAY = 40
-/** 提示里一键放宽到的目标（每天多少个） */
-const COMFORT_PER_DAY = 30
 /** 按日期模式的快捷截止日（天） */
 const PRESETS = [7, 14, 30, 60]
 /** 按每天数量模式的常用值（点一下就填进输入框，输入框仍可随便改） */
-const PER_DAY_PRESETS = [10, 20, 30, 40, 50]
+const PER_DAY_PRESETS = [10, 20, 30, 34, 50]
 
 type Mode = 'date' | 'perDay'
 type Tone = 'good' | 'bad' | 'muted'
 
-/** 按「每天 N 个」算还需要几天、哪天完 */
+/** 按「每天 N 个」算还需要几天、哪天完（**不再越过第一轮缓冲期**：见 storage.planAdvice） */
 function planByPerDay(remaining: number, perDay: number): { days: number; date: string } {
-  if (remaining <= 0 || perDay <= 0) return { days: 0, date: '' }
-  const days = Math.ceil(remaining / perDay)
-  return { days, date: addDaysToDate(todayISO(), days) }
+  const advice = planAdvice(remaining, perDay)
+  return { days: advice.days, date: advice.date }
 }
 
 /** 「今天够了吗」：够 = 绿，不够 = 红 */
@@ -96,21 +110,32 @@ function etaState(s: PlanStatus): { text: string; tone: Tone } {
 export default function PlanScreen() {
   const [status, setStatus] = useState<PlanStatus | null>(() => getPlanStatus())
   const [todayWords, setTodayWords] = useState<number>(() => loadTodayCounts().wordCount)
-  const [books, setBooks] = useState(() => getUploadBooks())
+  /** 全部词书（主词书排第一，R10）；计划和统计一样，默认落在主词书上 */
+  const [books, setBooks] = useState(() => allBooks())
   /** 改计划时临时回到表单（复用同一套 UI，不写两遍） */
   const [editing, setEditing] = useState(false)
+  /** 考试日期：锚点，默认 2026-12-12（storage.DEFAULT_EXAM_DATE） */
+  const [examDate, setExamDateState] = useState<string>(() => getExamDate())
 
   // 表单草稿
   const [mode, setMode] = useState<Mode>('date')
-  const [bookId, setBookId] = useState(BUILTIN_BOOK_ID)
+  const [bookId, setBookId] = useState(() => mainBookId())
   const [level, setLevel] = useState<LevelKey>('all')
-  const [deadline, setDeadline] = useState(() => addDaysToDate(todayISO(), 30))
-  const [perDayDraft, setPerDayDraft] = useState('20')
+  const [deadline, setDeadline] = useState(() => {
+    // 默认「30 天后」，但不许越过第一轮缓冲期（12-02）
+    const d = addDaysToDate(todayISO(), 30)
+    return checkBuffer(d).ok ? d : firstRoundDeadline()
+  })
+  const [perDayDraft, setPerDayDraft] = useState(String(getDailyGoal()))
+
+  /** 离考试还有几天（今天 = 当天）；考试日期只影响这一句，不影响每日目标 */
+  const examDays = daysUntil(examDate)
 
   const refresh = () => {
     setStatus(getPlanStatus())
     setTodayWords(loadTodayCounts().wordCount)
-    setBooks(getUploadBooks())
+    setBooks(allBooks())
+    setExamDateState(getExamDate())
   }
   useDidShow(refresh)
 
@@ -121,23 +146,17 @@ export default function PlanScreen() {
   const dateModeDays = Math.max(daysUntil(deadline), 0) + 1
   const dateModePerDay = draftRemain > 0 ? Math.ceil(draftRemain / dateModeDays) : 0
   const draftEta = planByPerDay(draftRemain, draftPerDayNum)
-  // 表单里的可行性：两种模式都可能「每天太多」
-  const draftHeavyPerDay = mode === 'date' ? dateModePerDay : draftPerDayNum
-  const draftHeavy = draftHeavyPerDay > HEAVY_PER_DAY
-  // 一键放宽：按日期模式改日期，按每天数量模式改每天的量
-  const comfortEta = planByPerDay(draftRemain, COMFORT_PER_DAY)
-  const draftRelaxLabel =
-    mode === 'date'
-      ? `改成 ${shortDate(comfortEta.date)}（每天 ${COMFORT_PER_DAY} 个）`
-      : `改成每天 ${COMFORT_PER_DAY} 个（${shortDate(comfortEta.date)} 背完）`
-
-  /** 选词书：系统 ActionSheet，界面里不占位置 */
+  /**
+   * 选词书：系统 ActionSheet，界面里不占位置。
+   * R10：列表来自 `allBooks()`（主词书排第一，标题里标出来），而不是写死「内置 + 上传」——
+   * 计划的默认落点也因此变成主词书。
+   */
   const chooseBook = () => {
-    const list = [BUILTIN_BOOK.title, ...books.map((b) => b.title)]
-    Taro.showActionSheet({ itemList: list })
+    Taro.showActionSheet({ itemList: books.map((b) => `${b.title}${b.main ? '（主词书）' : ''}`) })
       .then((res) => {
         if (typeof res.tapIndex !== 'number') return
-        setBookId(res.tapIndex === 0 ? BUILTIN_BOOK_ID : books[res.tapIndex - 1].id)
+        const picked = books[res.tapIndex]
+        if (picked) setBookId(picked.id)
       })
       .catch(() => undefined) // 取消
   }
@@ -160,21 +179,39 @@ export default function PlanScreen() {
     )
   }
 
+  /**
+   * 选「背完日期」：**越过 12-02 一律拒绝**（用户 2026-11 的硬约束）。
+   *
+   * 为什么不用 Picker 的 `end` 挡住就算了：`end` 只是不给选，用户不会知道「为什么」；
+   * 而且 from 已存计划 / 快捷胶囊进来的日期也可能越界。所以两道都要有 ——
+   * `end` 挡住常规操作，这里再拦一次并**给替代方案**。
+   */
+  /** 选「背完日期」：**用户点哪个就是哪个**，不再有缓冲期拦截（2026-11 用户要求自主设定） */
+  const pickDeadline = (value: string) => {
+    setDeadline(value)
+  }
+
+  /** 改考试日期：只是移动锚点，每日目标（34）和 12-02 的缓冲期规则都不跟着变 */
+  const saveExamDate = (value: string) => {
+    setExamDate(value)
+    setExamDateState(value)
+  }
+
   const createPlan = () => {
     if (mode === 'perDay' && draftPerDayNum <= 0) {
-      Taro.showToast({ title: '先填每天背多少个', icon: 'none' })
+      Taro.showToast({ title: '先填每天几个', icon: 'none' })
       return
     }
+    /**
+     * 提交：**没有任何缓冲期拦截**（2026-11 用户要求计划完全由自己定）。
+     *
+     * 这一处原来是最后一道闸门（「按每天 5 个 → 完成日晚于 12-02 → 拒绝并给方案」），
+     * 现在只做「至少得有一个驱动量」的校验。缓冲期仍然存在，但它只出现在提示文案里
+     * （`checkBuffer()`），不再改写用户填的日期或每天的量。
+     */
     setPlan(bookId, level, mode === 'date' ? deadline : '', mode === 'perDay' ? draftPerDayNum : 0)
     refresh()
     setEditing(false)
-  }
-
-  /** 表单里的一键放宽 */
-  const relaxDraft = () => {
-    if (!comfortEta.date) return
-    if (mode === 'date') setDeadline(comfortEta.date)
-    else setPerDayDraft(String(COMFORT_PER_DAY))
   }
 
   /** 改计划：把表单预填成当前计划的样子（含模式） */
@@ -210,17 +247,6 @@ export default function PlanScreen() {
       .catch(() => undefined)
   }
 
-  /** 一键放宽（进度页）：按每天 COMFORT_PER_DAY 个重排 */
-  const relaxPlan = () => {
-    if (!status) return
-    const eta = planByPerDay(status.remaining, COMFORT_PER_DAY)
-    if (!eta.date) return
-    if (status.plan.perDay > 0) setPlan(status.plan.bookId, status.plan.level, '', COMFORT_PER_DAY)
-    else setPlan(status.plan.bookId, status.plan.level, eta.date, 0)
-    refresh()
-    Taro.showToast({ title: `已改成每天 ${COMFORT_PER_DAY} 个`, icon: 'none' })
-  }
-
   /** 一键开背：直接进这本书这一档的翻书页（不用再走 词书列表 → 档次 两层） */
   const startReading = () => {
     if (!status) return
@@ -247,19 +273,13 @@ export default function PlanScreen() {
       ? `按每天 ${s.plan.perDay > 0 ? s.plan.perDay : s.perDay} 个`
       : `每天约 ${s.avgPerDay} 个`
     : ''
-  const heavy = Boolean(s && !s.finished && !s.bookMissing && s.perDay > HEAVY_PER_DAY)
-  const relaxEta = s ? planByPerDay(s.remaining, COMFORT_PER_DAY) : { days: 0, date: '' }
-  const relaxLabel = s
-    ? s.plan.perDay > 0
-      ? `改成每天 ${COMFORT_PER_DAY} 个`
-      : `改成 ${shortDate(relaxEta.date)}（每天 ${COMFORT_PER_DAY} 个）`
-    : ''
-
   return (
     <View style={STYLE.container}>
+      <PageCurtain label="学习计划" kicker="THE PLAN" />
       <ScrollView scrollY style={STYLE.list}>
         <View style={page}>
-          <View className="glass glass-card" style={styles.card}>
+          <PageHeader kicker="PLAN" title="学习计划" sub="定个节奏，每天回来推进一点" />
+<View className="glass glass-card" style={styles.card}>
             {showForm ? (
               /* ---------------- 建立 / 修改计划 ---------------- */
               <>
@@ -280,36 +300,52 @@ export default function PlanScreen() {
                   <Text style={styles.chevron}>›</Text>
                 </View>
 
+                {/*
+                  考试日期锚点（R4）。默认 2026-12-12，可改；
+                  它只影响两句话：「离考试还有几天」和「第一轮最晚哪天刷完（12-02）」。
+                  ⚠️ 12-02 是常量，不跟着这里漂 —— 改了考试日期也不会让第一轮晚一天。
+                */}
+                <Picker
+                  mode="date"
+                  value={examDate}
+                  start={todayISO()}
+                  onChange={(e) => saveExamDate(String(e.detail.value))}
+                >
+                  <View style={styles.formRow}>
+                    <Text style={styles.rowLabel}>考试日期</Text>
+                    <Text style={styles.rowValue}>{examDate}</Text>
+                    <Text style={styles.rowSide}>
+                      {examDays === 0 ? '就是今天' : examDays > 0 ? `${examDays} 天后` : '已过'}
+                    </Text>
+                    <Text style={styles.chevron}>›</Text>
+                  </View>
+                </Picker>
+
+
                 {/* 模式：定日期还是定每天的量。两个胶囊切换，不藏在下拉里 */}
                 <View style={styles.formRow}>
                   <Text style={styles.rowLabel}>怎么背</Text>
                   <View style={styles.modeRow}>
-                    {(['date', 'perDay'] as Mode[]).map((m) => {
-                      const on = mode === m
-                      return (
-                        <View
-                          key={m}
-                          {...PRESS}
-                          className={on ? undefined : 'glass glass-pill'}
-                          style={{ ...styles.modeChip, ...(on ? styles.chipOn : null) }}
-                          onClick={() => setMode(m)}
-                        >
-                          <Text style={on ? styles.chipOnText : styles.chipText}>
-                            {m === 'date' ? '按日期' : '按每天数量'}
-                          </Text>
-                        </View>
-                      )
-                    })}
+                    {(['date', 'perDay'] as Mode[]).map((m) => (
+                      <Chip
+                        key={m}
+                        label={m === 'date' ? '按日期' : '按每天数量'}
+                        on={mode === m}
+                        onClick={() => setMode(m)}
+                        style={styles.modeChip}
+                      />
+                    ))}
                   </View>
                 </View>
 
                 {mode === 'date' ? (
                   <>
+                    {/* 背完日期：**不设上限**，用户选哪天就是哪天（2026-11 去掉缓冲期拦截） */}
                     <Picker
                       mode="date"
                       value={deadline}
                       start={todayISO()}
-                      onChange={(e) => setDeadline(String(e.detail.value))}
+                      onChange={(e) => pickDeadline(String(e.detail.value))}
                     >
                       <View style={styles.formRow}>
                         <Text style={styles.rowLabel}>背完日期</Text>
@@ -319,21 +355,18 @@ export default function PlanScreen() {
                       </View>
                     </Picker>
 
-                    {/* 常用时长：点一下就把日期设成「N 天后」 */}
+                    {/* 常用时长：点一下就把日期设成「N 天后」；越过 12-02 的会被拒绝 */}
                     <View style={styles.chipRow}>
                       {PRESETS.map((n) => {
                         const value = addDaysToDate(todayISO(), n)
-                        const on = value === deadline
                         return (
-                          <View
+                          <Chip
                             key={n}
-                            {...PRESS}
-                            className={on ? undefined : 'glass glass-pill'}
-                            style={{ ...styles.chip, ...(on ? styles.chipOn : null) }}
-                            onClick={() => setDeadline(value)}
-                          >
-                            <Text style={on ? styles.chipOnText : styles.chipText}>{n} 天</Text>
-                          </View>
+                            label={`${n} 天`}
+                            on={value === deadline}
+                            onClick={() => pickDeadline(value)}
+                            style={styles.chip}
+                          />
                         )
                       })}
                     </View>
@@ -347,34 +380,32 @@ export default function PlanScreen() {
                           style={styles.input}
                           type="number"
                           value={perDayDraft}
-                          placeholder="20"
-                          placeholderStyle="color: #C7C7CD"
+                          placeholder={String(getDailyGoal())}
+                          placeholderStyle={`color: ${COLOR.secondary}`}
                           onInput={handlePerDayInput}
                         />
                       </View>
                       <Text style={styles.rowSide}>个词</Text>
                     </View>
 
-                    {/* 常用量（都是能坚持下来的区间）：点一下就填进输入框 */}
+                    {/* 常用量：34 = 全 app 的每日目标（`DAILY_GOAL`），其余是能坚持下来的区间 */}
                     <View style={styles.chipRow}>
-                      {PER_DAY_PRESETS.map((n) => {
-                        const on = draftPerDayNum === n
-                        return (
-                          <View
-                            key={n}
-                            {...PRESS}
-                            className={on ? undefined : 'glass glass-pill'}
-                            style={{ ...styles.chip, ...(on ? styles.chipOn : null) }}
-                            onClick={() => setPerDayDraft(String(n))}
-                          >
-                            <Text style={on ? styles.chipOnText : styles.chipText}>{n}</Text>
-                          </View>
-                        )
-                      })}
+                      {PER_DAY_PRESETS.map((n) => (
+                        <Chip
+                          key={n}
+                          label={String(n)}
+                          on={draftPerDayNum === n}
+                          onClick={() => {
+                            setPerDayDraft(String(n))
+                          }}
+                          style={styles.chip}
+                        />
+                      ))}
                     </View>
                   </>
                 )}
 
+                
                 {/* 预览：这一行是这张卡里最大的字 */}
                 <View style={styles.previewBlock}>
                   <Text style={styles.preview}>
@@ -391,23 +422,14 @@ export default function PlanScreen() {
                   </Text>
                 </View>
 
-                {/* 可行性：先说清「这个量偏大」，再给一键放宽 */}
-                {draftHeavy && draftRemain > 0 ? (
-                  <View style={styles.tipBlock}>
-                    <Text style={styles.tipText}>
-                      每天 {draftHeavyPerDay} 个偏大，容易坚持不下来
-                    </Text>
-                    <View
-                      {...PRESS}
-                      className="glass glass-pill"
-                      style={styles.tipBtn}
-                      onClick={relaxDraft}
-                    >
-                      <Text style={styles.tipBtnText}>{draftRelaxLabel}</Text>
-                    </View>
-                  </View>
-                ) : null}
-              </>
+                {/*
+                  可行性提示 + 一键放宽：**2026-11 整块移除**。
+                  它的两个落点（「每天偏大」→ 44 个/天、「吃缓冲期」→ 12-02 反推量）
+                  本质上都是在替用户改计划，而用户这一轮的要求是「填多少就是多少」。
+                  留一段空注释而不是删干净，是为了让接手的人知道这里曾经有东西、别又加回去。
+                */}
+                
+                              </>
             ) : (
               /* ---------------- 计划进度 ---------------- */
               <>
@@ -431,6 +453,7 @@ export default function PlanScreen() {
                   {s!.hasDeadline
                     ? `${shortDate(s!.plan.startedAt)} → ${shortDate(s!.plan.deadline)}`
                     : `${shortDate(s!.plan.startedAt)} 开始 · 每天 ${s!.perDay} 个词`}
+                  {` · 考试 ${shortDate(examDate)}`}
                 </Text>
 
                 {/* 严格对齐的表：标签列 144rpx，图形行留空占位，两条进度都缩进到值列 */}
@@ -462,6 +485,13 @@ export default function PlanScreen() {
                     {todayState(s!, todayWords).text}
                   </Text>
                 </View>
+                {/* 「今天」这一行比的是**计划节奏**（计划要你每天几个），不是全 app 的每日目标（34）——
+                    两者含义不同，所以标签写清，不让用户以为目标被偷偷改了 */}
+                <Text style={styles.rowNote}>
+                  {s!.perDay > 0
+                    ? `按计划节奏 ${s!.perDay} 个/天 · 每日目标 ${getDailyGoal()} 个`
+                    : `每日目标 ${getDailyGoal()} 个`}
+                </Text>
                 {s!.perDay > 0 ? (
                   <View style={styles.tableRow}>
                     <Text style={styles.rowLabel} />
@@ -497,32 +527,17 @@ export default function PlanScreen() {
                   ) : null}
                 </View>
 
-                {/* 可行性：目标不合理时直说，并给一键放宽 */}
-                {heavy && relaxEta.date ? (
-                  <View style={styles.tipBlock}>
-                    <Text style={styles.tipText}>
-                      每天 {s!.perDay} 个偏大，容易坚持不下来
-                    </Text>
-                    <View
-                      {...PRESS}
-                      className="glass glass-pill"
-                      style={styles.tipBtn}
-                      onClick={relaxPlan}
-                    >
-                      <Text style={styles.tipBtnText}>{relaxLabel}</Text>
-                    </View>
-                  </View>
-                ) : null}
-              </>
+                {/* 进度页那块「可行性 + 一键挪回缓冲期内」也在 2026-11 移除了：
+                    老计划越过 12-02 只会在「预计」那一行如实显示，不再劝、不再改。 */}
+                
+                              </>
             )}
           </View>
 
           {/* 操作区：主操作一个，其余退成文字链接 */}
           {showForm ? (
             <>
-              <View {...PRESS} style={styles.primary} onClick={createPlan}>
-                <Text style={styles.primaryText}>{editing ? '保存计划' : '开始计划'}</Text>
-              </View>
+              <BigAction label={editing ? '保存计划' : '开始计划'} onTap={createPlan} />
               {editing ? (
                 <View {...PRESS} style={styles.textBtn} onClick={() => setEditing(false)}>
                   <Text style={styles.textBtnText}>取消</Text>
@@ -580,6 +595,21 @@ const styles: Record<string, CSSProperties> = {
   },
   sub: {
     marginTop: '10rpx',
+    fontSize: FONT.pageNo,
+    lineHeight: '32rpx',
+    color: COLOR.secondary
+  },
+  /** 缓冲期那行说明：紧跟在「考试日期」下面，属于同一组信息，不该占一整个表单行 */
+  bufferNote: {
+    marginTop: '4rpx',
+    fontSize: FONT.pageNo,
+    lineHeight: '32rpx',
+    color: COLOR.secondary
+  },
+  /** 表格里的补充说明（「按计划节奏 N 个 · 每日目标 34 个」），缩进到值列 */
+  rowNote: {
+    marginLeft: '144rpx',
+    marginTop: '2rpx',
     fontSize: FONT.pageNo,
     lineHeight: '32rpx',
     color: COLOR.secondary
@@ -686,31 +716,10 @@ const styles: Record<string, CSSProperties> = {
     alignItems: 'center'
   },
   modeChip: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: '16rpx',
-    paddingLeft: '24rpx',
-    paddingRight: '24rpx',
-    paddingTop: '14rpx',
-    paddingBottom: '14rpx',
-    borderRadius: '26rpx'
-  },
-  chipOn: {
-    backgroundColor: COLOR.black
+    marginRight: '16rpx'
   },
   chip: {
-    minWidth: '104rpx',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: '16rpx',
-    marginBottom: '8rpx',
-    paddingLeft: '24rpx',
-    paddingRight: '24rpx',
-    paddingTop: '16rpx',
-    paddingBottom: '16rpx',
-    borderRadius: '26rpx'
+    marginRight: '16rpx'
   },
   chipRow: {
     marginTop: '8rpx',
@@ -718,14 +727,6 @@ const styles: Record<string, CSSProperties> = {
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center'
-  },
-  chipText: {
-    fontSize: FONT.meta,
-    color: COLOR.secondary
-  },
-  chipOnText: {
-    fontSize: FONT.meta,
-    color: COLOR.onDark
   },
   // 「每天背」的输入框：浅灰底小方块，和生词本页那个一致
   inputBox: {
@@ -737,7 +738,7 @@ const styles: Record<string, CSSProperties> = {
     paddingRight: '16rpx',
     paddingTop: '12rpx',
     paddingBottom: '12rpx',
-    borderRadius: '20rpx',
+    borderRadius: '8rpx',
     backgroundColor: COLOR.fill
   },
   input: {
@@ -784,10 +785,10 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    height: '72rpx',
+    height: '88rpx',
     paddingLeft: '28rpx',
     paddingRight: '28rpx',
-    borderRadius: '36rpx'
+    borderRadius: '6rpx'
   },
   tipBtnText: {
     fontSize: FONT.meta,
@@ -816,14 +817,14 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    height: '96rpx',
-    borderRadius: '48rpx',
-    backgroundColor: COLOR.black
+    height: '104rpx',
+    borderRadius: '0rpx',
+    backgroundColor: COLOR.onGround
   },
   primaryText: {
     fontSize: '32rpx',
     fontWeight: '600',
-    color: COLOR.onDark
+    color: '#17150F'
   },
   footRow: {
     marginTop: '16rpx',
@@ -845,7 +846,7 @@ const styles: Record<string, CSSProperties> = {
   },
   textBtnText: {
     fontSize: FONT.meta,
-    color: COLOR.secondary
+    color: COLOR.onGroundSoft
   },
   dangerText: {
     fontSize: FONT.meta,

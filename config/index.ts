@@ -66,7 +66,8 @@ export default defineConfig<'webpack5'>(async (merge) => {
       }
     },
     h5: {
-      publicPath: '/',
+      // 桌面版要能直接 file:// 打开（不跑本地服务器），所以资源路径用相对路径
+      publicPath: './',
       staticDirectory: 'static',
       output: {
         filename: 'js/[name].[hash:8].js',
@@ -92,6 +93,11 @@ export default defineConfig<'webpack5'>(async (merge) => {
       },
       webpackChain(chain) {
         chain.resolve.plugin('tsconfig-paths').use(TsconfigPathsPlugin)
+        // 2026-11：PWA 走的是国际线路（workers.dev），每个 chunk 都要一次 RTT，
+        // 23 个文件 = 十几秒。这里关掉 vendor 拆分和 runtime 拆分，尽量并成一个包。
+        // Taro 的类型里 splitChunks 只接受对象，运行时传 false 是合法的（webpack 原生支持）
+        ;(chain.optimization as any).splitChunks(false)
+        ;(chain.optimization as any).runtimeChunk(false)
       }
     },
     rn: {

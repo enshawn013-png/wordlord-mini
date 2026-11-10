@@ -1,0 +1,1113 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
+import { ScrollView, Text, View } from '@tarojs/components'
+import Taro from '@tarojs/taro'
+import { exampleOf, Word } from '../data/words'
+import { SegBar } from './seg-bar'
+import { SpeakBtn } from './speak-btn'
+import { COLOR, FONT, PAGE_PAD } from '../theme'
+
+/**
+ * 卡片版式（第四版：2026-11 用户报的三个问题）。
+ *
+ * ## 这一版改的是什么（用户原话对应到代码）
+ *
+ * | 用户说 | 原来 | 现在 |
+ * | --- | --- | --- |
+ * | 「点认识和不认识都自动跳下一个，这个不舒服」 | 「认识」点完当场飞走 | 两个按钮都**停在原地**，先看答案 |
+ * | 「点那个认识也要跳出中文」 | 「认识」不展开释义 | 点「认识」也把释义 sheet 推上来 |
+ * | 「认识变成下一个，到了下一个就变回来」 | 标签不变 | 点完标签变成「下一个」，换卡后自动变回「不认识 / 认识」 |
+ * | 「最后一个单词点按钮没反应」 | 推进函数在最后一张直接 return | 最后一张点完进**完成面板**，问要不要再背一批 |
+ *
+ * ## 交互（三步，全站统一 —— 复习页 / 抽查卡都照这个来）
+ *
+ * 1. **没作答**：只有两个按钮 —— 左「不认识」、右「认识」。两者动作顺序都一样：
+ *    **先记录，再展开答案，不跳走**。
+ *    - 不认识 → `onMark()`（七级标记 +1，和翻书页点圆圈同一个写入）
+ *    - 认识   → `onMaster()`（和翻书页「我会了」药丸同一个写入）
+ * 2. **已作答**：释义 + 例句从底部浮上来，按钮变成「上一个 / 下一个」。
+ *    这一屏是**只读**的：再点按钮不会二次记录（原来「不认识」完再点「认识」会把
+ *    同一个词直接送进「熟练掌握词汇」，等于一次误触抹掉一次判断）。
+ * 3. **下一个**：滑走 → 新卡从右边推进来 → 按钮复位成「不认识 / 认识」。
+ *    已经是最后一张时，直接进完成面板（不再「点了没反应」）。
+ *
+ * 另外：点卡片本身只是「偷看一眼释义」（`peeked`，不记录判断），
+ * 左右滑动仍然是「跳过 / 回看」，滑动之后不会误触卡片的 peek（用 ref 挡掉 tap）。
+ *
+ * ## 位置
+ * `index` 从翻书页传进来的 `page * PAGE_SIZE` 起步，每次移动都回调
+ * `onIndexChange(index)`，翻书页用它写 `setCurrentPage` —— 两个版式共享同一个「上次背到哪儿」。
+ *
+ * ## 视觉（参考扇贝 / 不背单词，细节见 styles 里的注释）
+ * - 一张卡只有一个大字（单词），音标紧贴下方，右侧一个小喇叭。
+ * - 没翻面时「词 + 音标 + 提示」作为一个整体垂直居中；翻面后从顶部往下排释义和例句。
+ * - 例句里被考的词用暖色标出来。
+ * - 底部两个等宽大按钮：左「不认识」描边、右「认识」实心。
+ */
+export interface CardDeckProps {
+  /** 这一档还没掌握的词，顺序和翻书页一致 */
+  words: Word[]
+  /** 从第几个开始（= 上次翻书那一页的第一个词） */
+  startIndex: number
+  /** 已掌握的词（卡面压暗） */
+  mastered: Record<string, number>
+  /** 今天已经动过手的词数 */
+  todayCount: number
+  /** 每日目标（34） */
+  todayTarget: number
+  /** 认识 → 已掌握 */
+  onMaster: (word: Word) => void
+  /** 不认识 → 七级标记 +1（和翻书页的圆圈同一个写入） */
+  onMark: (word: Word) => void
+  /** 各词的当前档位（0~7），用来在卡角显示「标记 3/7」 */
+  progress: Record<string, number>
+  /** 长按卡片 → 档位 −1（和翻书页长按圆圈同一个写入） */
+  onUnmark: (word: Word) => void
+  /** 撤销「认识」→ 把掌握撤回（点错那一题的退路） */
+  onUnmaster: (word: Word) => void
+  /** 位置变化 */
+  onIndexChange: (index: number) => void
+  /** 这一批背完之后，词库里还有没有词可以再背一批（没有就不显示「再背 N 个」） */
+  canMore?: boolean
+  /** 「再背 N 个」里的 N（= 今天的每日目标） */
+  moreCount?: number
+  /** 再要一批（父页面重新 loadBatch，并且换 key 让本组件重新挂载） */
+  onMore?: () => void
+  /** 「今天到这」：退出背单词界面 */
+  onExit?: () => void
+}
+
+/** 七级标记的上限（和 storage.ts 的 MAX_MARK 保持同一个数） */
+const MAX_MARK = 7
+
+/** 卡片滑走时的位移（px）：大于卡片宽度，整张滑出屏幕 */
+const FLY_OUT = 420
+
+/** 判定结果：null = 还没作答 */
+type Verdict = 'master' | 'mark'
+
+export function CardDeck({
+  words,
+  startIndex,
+  mastered,
+  todayCount,
+  todayTarget,
+  onMaster,
+  onMark,
+  progress,
+  onUnmark,
+  onUnmaster,
+  onIndexChange,
+  canMore = false,
+  moreCount,
+  onMore,
+  onExit
+}: CardDeckProps) {
+  const total = words.length
+  const [index, setIndex] = useState(() =>
+    Math.min(Math.max(startIndex, 0), Math.max(total - 1, 0))
+  )
+  /** 这一次的判定（null = 没作答）。**记录只在 null → 有值 的那一下发生**，见 answer() */
+  const [verdict, setVerdict] = useState<Verdict | null>(null)
+  /** 只「偷看」释义，不算作答（点卡片触发） */
+  const [peeked, setPeeked] = useState(false)
+  /** 这一批背完了（最后一张点完「下一个」之后） */
+  const [done, setDone] = useState(false)
+  const [dx, setDx] = useState(0)
+  const [opacity, setOpacity] = useState(1)
+  const [instant, setInstant] = useState(false)
+  const [busy, setBusy] = useState(false)
+  /** 本次操作计数：认识 / 不认识各几次（底部一句实话 + 完成面板） */
+  const [known, setKnown] = useState(0)
+  const [marked, setMarked] = useState(0)
+  /** 卡片上临时的一句话（标满 / 减一 / 已记一档），2 秒后自己消失 */
+  const [note, setNote] = useState('')
+  /**
+   * 刚做的这一次判定，留 6 秒可撤销（点错「认识 / 不认识」的退路）。
+   *
+   * `kind: 'none'` 表示「这一下没真写进去」（标满 7 次时再点不认识）——
+   * 那种情况只把界面退回未作答，**绝不能**去调 onUnmark 减档，否则会把 7 减成 6。
+   */
+  const [undo, setUndo] = useState<{ word: Word; kind: Verdict | 'none'; at: number } | null>(null)
+  /**
+   * 点按钮时飘出来的那一个小 emoji（苹果自带的那种）。
+   * 用 key = 时间戳 保证同一个 emoji 连点也会重新播动画（React 会重建节点）。
+   */
+  const [burst, setBurst] = useState<{ id: number; emoji: string } | null>(null)
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
+  /** 手指这一下有没有真的拖动过（拖动结束的那一次 tap 不算「点开释义」） */
+  const dragged = useRef(false)
+  /** 跟手位移也要用 ref 存一份：onTouchEnd 里读 state 会拿到上一帧的旧值 */
+  const dxRef = useRef(0)
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([])
+
+  useEffect(
+    () => () => {
+      timers.current.forEach((t) => clearTimeout(t))
+    },
+    []
+  )
+
+  /**
+   * 换了一批词（父页面「再背 N 个」）就从头开始。
+   * 父页面还会换 key 让组件重新挂载，这里是第二道保险：只要 words 变了，
+   * 位置 / 判定 / 完成态一律清空，绝不把上一批的状态带到新的一批里。
+   */
+  useEffect(() => {
+    setIndex(Math.min(Math.max(startIndex, 0), Math.max(words.length - 1, 0)))
+    setVerdict(null)
+    setPeeked(false)
+    setDone(false)
+    setBusy(false)
+    setDx(0)
+    setOpacity(1)
+    // startIndex 只在挂载时用，这里不放进依赖（换批时父页面传 0）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [words])
+
+  const current = words[index]
+  /** 这个词已经被点过几次「不认识」（0~7） */
+  const markCount = current ? progress[current.word] ?? 0 : 0
+  /** 释义露出来了没有：作答了算，偷看过也算 */
+  const revealed = Boolean(verdict) || peeked
+
+  const later = useCallback((fn: () => void, ms: number) => {
+    timers.current.push(setTimeout(fn, ms))
+  }, [])
+
+  /** 飘一个小 emoji：700ms 后自动清掉（动画本身就是 700ms，见 app.css 的 burstUp） */
+  const fireBurst = useCallback(
+    (emoji: string) => {
+      setBurst({ id: Date.now(), emoji })
+      later(() => setBurst(null), 720)
+    },
+    [later]
+  )
+
+  const vibrate = useCallback(() => {
+    try {
+      Taro.vibrateShort({ type: 'light' })
+    } catch {
+      // 老基础库 / 用户在系统里关掉了震动：忽略，不影响流程
+    }
+  }, [])
+
+  /**
+   * 换一张卡（只负责动画和位置，不写任何数据）：
+   * ① 当前卡向左滑出 + 淡出（240ms）
+   * ② 换 index、收起释义、判定清零，新卡瞬间挪到右侧（instant，无过渡）
+   * ③ 新卡滑回原位 + 淡入（260ms）
+   */
+  const slideTo = useCallback(
+    (dir: 1 | -1, nextIndex: number) => {
+      setDx(dir * -FLY_OUT)
+      setOpacity(0)
+      later(() => {
+        setInstant(true)
+        setIndex(nextIndex)
+        setVerdict(null)
+        setPeeked(false)
+        setDx(dir * 90)
+        setOpacity(0)
+        later(() => {
+          setInstant(false)
+          setDx(0)
+          setOpacity(1)
+          later(() => setBusy(false), 260)
+        }, 32)
+      }, 240)
+    },
+    [later]
+  )
+
+  /**
+   * 「下一个」：不是最后一张就换卡；**是最后一张就进完成面板**。
+   * 这也是用户在最后一张点按钮「没反应」的那处 bug 的修法 ——
+   * 任何一次推进都必须有可见结果：要么是新卡，要么是结算屏。
+   */
+  const advance = useCallback(() => {
+    if (busy || !current) return
+    vibrate()
+    if (index >= total - 1) {
+      setBusy(true)
+      setDx(-FLY_OUT)
+      setOpacity(0)
+      later(() => {
+        setDone(true)
+        setInstant(false)
+        setDx(0)
+        setOpacity(1)
+        setBusy(false)
+      }, 240)
+      return
+    }
+    setBusy(true)
+    slideTo(1, index + 1)
+  }, [busy, current, index, total, later, slideTo, vibrate])
+
+  /** 右滑 / 「上一个」：只退位置，不动数据（判定和 peek 都清掉，重新考自己） */
+  const goBack = useCallback(() => {
+    if (busy || index <= 0) return
+    setBusy(true)
+    vibrate()
+    setDx(FLY_OUT)
+    setOpacity(0)
+    later(() => {
+      setInstant(true)
+      setIndex((i) => Math.max(i - 1, 0))
+      setVerdict(null)
+      setPeeked(false)
+      setDx(-90)
+      setOpacity(0)
+      later(() => {
+        setInstant(false)
+        setDx(0)
+        setOpacity(1)
+        later(() => setBusy(false), 260)
+      }, 32)
+    }, 200)
+  }, [busy, index, later, vibrate])
+
+  /**
+   * 作答：「不认识」= 七级标记 +1，「认识」= 已掌握。
+   *
+   * 两个按钮都是**先记录、再摊开答案、停在原地**（用户 2026-11 要求）。
+   * 已经作答过（verdict 有值）就不再进这里 —— 已作答状态的两个按钮是
+   * 「上一个 / 下一个」，没有任何路径能对一个词判两次。
+   *
+   * 标满 7 次时仍然摊开答案（用户显然想看这个词），只是不再往上加，
+   * 并说明「长按卡片可以减一」—— 和翻书页那句「已标满 7 次 · 长按圆圈可以减一」同一个话术。
+   * 关键是**判定照样成立**：按钮照常变成「下一个」，不会出现「点了没反应」。
+   */
+  const answer = useCallback(
+    (v: Verdict) => {
+      if (busy || !current || verdict) return
+      vibrate()
+      if (v === 'master') {
+        onMaster(current)
+        setKnown((n) => n + 1)
+        fireBurst('✨')
+        setNote(markCount > 0 ? '已掌握 · 七级标记清零' : '已掌握')
+      } else if (markCount >= MAX_MARK) {
+        setNote('已标满 7 次 · 长按卡片可以减一')
+        fireBurst('📌')
+      } else {
+        onMark(current)
+        setMarked((n) => n + 1)
+        fireBurst('📌')
+        // 「长按可减」写在标记那一刻：隐藏操作必须在用户正动手的时候告诉他，
+        // 塞在页面角落的静态提示没人看
+        setNote(`已记一档 · ${markCount + 1}/7 · 长按卡片可减`)
+      }
+      later(() => setNote(''), 1800)
+      // 留一条撤销退路：点错一下不用去「熟练掌握词汇」里翻（用户 2026-11 要求）
+      const wrote: Verdict | 'none' = v === 'master' || markCount < MAX_MARK ? v : 'none'
+      setUndo({ word: current, kind: wrote, at: index })
+      later(() => setUndo((u) => (u && u.word.word === current.word && u.at === index ? null : u)), 6000)
+      setVerdict(v)
+    },
+    [busy, current, verdict, onMaster, onMark, markCount, fireBurst, later, vibrate, index]
+  )
+
+  /**
+   * 撤销刚做的判定。两种落点：
+   * - 还停在这一张卡上 → 把记录退回去，按钮回到「不认识 / 认识」，可以重新选；
+   * - 已经翻到别的卡了 → 只退回那一个词的记录（不动当前这张），并说清楚撤的是谁。
+   */
+  const undoLast = useCallback(() => {
+    if (!undo) return
+    const { word, kind, at } = undo
+    vibrate()
+    if (kind === 'master') {
+      onUnmaster(word)
+      setKnown((n) => Math.max(0, n - 1))
+    } else if (kind === 'mark') {
+      onUnmark(word)
+      setMarked((n) => Math.max(0, n - 1))
+    }
+    if (at === index) {
+      setVerdict(null)
+      setNote('已撤销 · 重新选')
+    } else {
+      setNote(`已撤销「${word.word}」`)
+    }
+    later(() => setNote(''), 1800)
+    setUndo(null)
+  }, [undo, index, onUnmaster, onUnmark, later, vibrate])
+
+  // 位置变了就告诉翻书页（它负责 setCurrentPage，两个版式共享同一个「上次背到哪儿」）
+  useEffect(() => {
+    onIndexChange(index)
+  }, [index, onIndexChange])
+
+  if (!current && !done) return null
+
+  const meta = current ? [current.phonetic, current.pos].filter(Boolean).join('   ') : ''
+  const example = current ? exampleOf(current.word) : null
+  const isMastered = current ? Boolean(mastered[current.word]) : false
+  const goalPct = todayTarget > 0 ? Math.round((todayCount / todayTarget) * 100) : 0
+  const left = total - index - 1
+  /** 完成面板里的那句「再背几个」 */
+  const nextBatch = moreCount && moreCount > 0 ? moreCount : todayTarget
+
+  // ---------------- 完成面板（今天这一批背完）----------------
+  if (done) {
+    const title =
+      todayTarget > 0 && todayCount >= todayTarget
+        ? `今天的 ${todayTarget} 个背完了`
+        : `这一批 ${total} 个背完了`
+    return (
+      <View style={styles.wrap}>
+        <View style={styles.doneArea}>
+          <View style={styles.doneCard}>
+            <Text style={styles.doneEmoji}>🎉</Text>
+            <Text style={styles.doneTitle}>{title}</Text>
+            <Text style={styles.doneStat}>
+              认识 {known} 个 · 不认识 {marked} 个
+            </Text>
+            <Text style={styles.doneGoal}>
+              今日累计 {todayCount} 个
+              {goalPct >= 100 ? ' · 已达标' : todayTarget > 0 ? ` · 目标 ${todayTarget}` : ''}
+            </Text>
+            <Text style={styles.doneAsk}>
+              {canMore
+                ? `还留着力气的话，要继续多背 ${nextBatch} 个吗？`
+                : '这一档的词都背过了，明天再见。'}
+            </Text>
+
+            {canMore && onMore ? (
+              <View
+                hoverClass="press"
+                style={{ ...styles.doneBtn, ...styles.doneBtnPrimary }}
+                onClick={onMore}
+              >
+                <Text style={styles.doneBtnPrimaryText}>再背 {nextBatch} 个</Text>
+              </View>
+            ) : null}
+            {onExit ? (
+              <View
+                hoverClass="press"
+                style={{
+                  ...styles.doneBtn,
+                  ...styles.doneBtnGhost,
+                  ...(canMore ? null : styles.doneBtnGhostSolo)
+                }}
+                onClick={onExit}
+              >
+                <Text style={styles.doneBtnGhostText}>
+                  {canMore ? '今天到这，明天见' : '返回'}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </View>
+    )
+  }
+
+  // ---------------- 卡片 ----------------
+  return (
+    <View style={styles.wrap}>
+      {/* ── 顶部：位置 + 今日进度（扇贝那根细进度条的位置） ── */}
+      <View style={styles.topRow}>
+        <Text style={styles.counter}>
+          {index + 1}
+          <Text style={styles.counterUnit}> / {total}</Text>
+        </Text>
+        <View style={styles.goalBox}>
+          <Text style={styles.goalText}>今日 </Text>
+          <Text style={styles.goalNum}>{todayCount}</Text>
+          {/* 超额背的时候（34 背完还继续）不再写「68 / 34」—— 分母是「今天的目标」，
+              不是「今天最多能背多少」，写成分数会让人以为哪里算错了 */}
+          <Text style={styles.goalText}>
+            {todayTarget > 0 && todayCount > todayTarget ? ' 个' : ` / ${todayTarget}`}
+          </Text>
+          {goalPct >= 100 ? <Text style={styles.goalDone}>已达标</Text> : null}
+        </View>
+      </View>
+
+      {/* 分段进度：和首页 / 复习页同一条进度语汇（components/seg-bar.tsx） */}
+      <SegBar value={index + 1} total={total} style={{ marginTop: '16rpx' }} />
+
+      {/* ── 卡片 ── */}
+      <View style={styles.cardArea}>
+        {burst ? (
+          <Text key={burst.id} style={styles.burst}>
+            {burst.emoji}
+          </Text>
+        ) : null}
+        <View
+          style={{
+            ...styles.card,
+            // 翻面后底部要留出 sheet 的位置：sheet 是 fixed 高度的绝对定位块，
+            // 不留这 320rpx 的话卡片会缩成一条，sheet 就叠在词上了
+            ...(revealed ? { paddingBottom: '320rpx' } : null),
+            transform: `translate3d(${dx}px, 0, 0)`,
+            opacity,
+            transition: instant
+              ? 'none'
+              : 'transform 260ms cubic-bezier(.22,.61,.36,1), opacity 220ms ease'
+          }}
+          onTouchStart={(e: any) => {
+            const t = e.touches[0]
+            touchStart.current = { x: t.clientX, y: t.clientY }
+            dragged.current = false
+          }}
+          onTouchMove={(e: any) => {
+            const s = touchStart.current
+            if (!s) return
+            const t = e.touches[0]
+            const mx = t.clientX - s.x
+            const my = t.clientY - s.y
+            // 竖向意图明显时不跟手（把上下滑让给页面）
+            if (Math.abs(mx) > Math.abs(my) && Math.abs(mx) > 8) {
+              dragged.current = true
+              setInstant(true)
+              dxRef.current = mx * 0.55
+              setDx(dxRef.current)
+            }
+          }}
+          onTouchEnd={() => {
+            const moved = dxRef.current
+            dxRef.current = 0
+            setInstant(false)
+            setDx(0)
+            touchStart.current = null
+            if (moved < -70) advance()
+            else if (moved > 70) goBack()
+          }}
+          onClick={() => {
+            // 拖动结束那一下会跟着一个 click，别把它当成「点卡片看释义」
+            if (dragged.current) {
+              dragged.current = false
+              return
+            }
+            setPeeked(true)
+          }}
+          onLongPress={() => {
+            if (markCount <= 0) {
+              setNote('这个词还没标记')
+            } else {
+              onUnmark(current)
+              fireBurst('↩️')
+              setNote(`标记 −1（现在 ${markCount - 1}/7）`)
+            }
+            later(() => setNote(''), 1600)
+          }}
+        >
+          {/* 卡面顶部：分档芯片钉在卡顶 */}
+          <View style={styles.chipRow}>
+            <View style={styles.chip}>
+              <Text style={styles.chipText}>{isMastered ? '已掌握' : '六级核心'}</Text>
+            </View>
+            {markCount > 0 ? (
+              <Text style={markCount >= MAX_MARK ? styles.markFull : styles.markTag}>
+                {markCount >= MAX_MARK ? '已标满 7/7' : `标记 ${markCount}/7`}
+              </Text>
+            ) : null}
+          </View>
+
+          {/*
+            词的排版分两种状态：
+            - 没翻面：**中间那块自己垂直居中**（词、音标、提示是一个整体，不是各飘各的）
+            - 翻面后：从顶部往下自然排，释义和例句在分割线下面展开
+          */}
+          <View style={revealed ? styles.topBlock : styles.centerBlock}>
+            <Text style={{ ...styles.word, ...(isMastered ? styles.wordDone : null) }}>
+              {current.word}
+            </Text>
+
+            {/* 音标 + 发音（发音只是个小喇叭，不做大按钮） */}
+            <View style={styles.metaRow}>
+              {meta ? <Text style={styles.meta}>{meta}</Text> : null}
+              <SpeakBtn word={current.word} style={styles.speak} />
+            </View>
+
+            {revealed ? null : <Text style={styles.hint}>轻点卡片看释义</Text>}
+          </View>
+
+          {/*
+            释义 sheet：不再把释义塞进卡片正文，而是像 iOS 的 sheet 一样
+            从卡片底部浮上来 —— 顶部一条 72×8rpx 的把手、四个角只圆上面两个、
+            半透明暖白 + backdrop blur，背后的单词会透出来一点影子（这就是「玻璃」的来源）。
+            backdrop-filter 在个别安卓机型上会降级成纯色半透明，所以底色给到 .86，
+            降级了也照样读得清；不使用它做唯一的对比来源。
+          */}
+          {revealed ? (
+            <View style={styles.sheet}>
+              <View style={styles.sheetHandle} />
+              {/* 判定回执：让用户一眼看到「我刚才那一下记成什么了」 */}
+              {verdict ? (
+                <Text style={styles.verdictLine}>
+                  {verdict === 'master'
+                    ? '已标为认识 · 进「熟练掌握词汇」'
+                    : markCount >= MAX_MARK
+                      ? `不认识 · 已标满 ${MAX_MARK}/${MAX_MARK}`
+                      : `不认识 · 已记 ${markCount}/7 档，明天再来看看`}
+                </Text>
+              ) : null}
+              <ScrollView scrollY style={styles.sheetBody}>
+                <Text className="text-break" style={styles.definition}>
+                  {current.definition}
+                </Text>
+                {example ? (
+                  <View style={styles.example}>
+                    <Text className="text-break" style={styles.exampleEn}>
+                      {highlight(example.en, current.word)}
+                    </Text>
+                    <Text className="text-break" style={styles.exampleZh}>
+                      {example.zh}
+                    </Text>
+                  </View>
+                ) : null}
+              </ScrollView>
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      {/* ── 底部按钮 ──
+          未作答：左「不认识」（描边）右「认识」（实心）；
+          已作答：左「上一个」右「下一个」，第一个词没有「上一个」就让「下一个」吃满整行。 */}
+      {verdict === null ? (
+        <View style={styles.actions}>
+          <View
+            hoverClass="press"
+            style={{ ...styles.btn, ...styles.btnGhost }}
+            onClick={() => answer('mark')}
+          >
+            <Text style={styles.btnGhostText}>不认识</Text>
+          </View>
+          <View
+            hoverClass="press"
+            style={{ ...styles.btn, ...styles.btnPrimary }}
+            onClick={() => answer('master')}
+          >
+            <Text style={styles.btnPrimaryText}>认识</Text>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.actions}>
+          {index > 0 ? (
+            <View hoverClass="press" style={{ ...styles.btn, ...styles.btnGhost }} onClick={goBack}>
+              <Text key="prev" style={styles.btnGhostText}>
+                上一个
+              </Text>
+            </View>
+          ) : null}
+          <View
+            hoverClass="press"
+            style={{ ...styles.btn, ...styles.btnPrimary, flex: index > 0 ? 1.6 : 1 }}
+            onClick={advance}
+          >
+            <Text key="next" style={styles.btnPrimaryText}>
+              {index >= total - 1 ? '完成' : '下一个'}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* ── 底部一行：左边本来是「左滑跳过」这类可丢的提示，
+             刚做完判定时这里换成一颗「↩︎ 撤销」胶囊 ——
+             离手指最近、又不在两个大按钮的正下方（不会把「不认识」点成撤销），
+             而且这一行高度是常驻的，胶囊出现/消失都不推动上面的卡片。 */}
+      <View style={styles.foot}>
+        <View style={styles.footLeft}>
+          {undo ? (
+            <View hoverClass="press" style={styles.undoPill} onClick={undoLast}>
+              <Text style={styles.undoText}>
+                {undo.at === index ? '↩︎ 撤销' : `↩︎ 撤销「${undo.word.word}」`}
+              </Text>
+            </View>
+          ) : null}
+          {note ? (
+            <Text style={styles.footNote}>{note}</Text>
+          ) : !undo ? (
+            <Text style={styles.footText}>
+              {known + marked > 0 ? `认识 ${known} · 不认识 ${marked}` : '左滑跳过 · 右滑回看'}
+            </Text>
+          ) : null}
+        </View>
+        <Text style={styles.footText}>{index >= total - 1 ? '最后一个' : `还剩 ${left} 个`}</Text>
+      </View>
+    </View>
+  )
+}
+
+/**
+ * 例句里把目标词标出来（扇贝那种「同一句里被考的词高亮」）。
+ *
+ * 只标第一次出现、不分大小写；词形变化（vulnerable / vulnerability）不匹配就整句不标 ——
+ * 宁可没有，也不要错标到别的词上。
+ * 返回片段数组：小程序里只有 Text 嵌 Text 才有富文本，不能塞 HTML 字符串。
+ */
+function highlight(sentence: string, word: string) {
+  if (!sentence || !word) return sentence
+  const i = sentence.toLowerCase().indexOf(word.toLowerCase())
+  if (i < 0) return sentence
+  return (
+    <>
+      {sentence.slice(0, i)}
+      <Text style={styles.hl}>{sentence.slice(i, i + word.length)}</Text>
+      {sentence.slice(i + word.length)}
+    </>
+  )
+}
+
+const styles: Record<string, CSSProperties> = {
+  wrap: {
+    flex: 1,
+    paddingLeft: PAGE_PAD,
+    paddingRight: PAGE_PAD,
+    display: 'flex',
+    flexDirection: 'column'
+  },
+
+  // ---------- 顶部 ----------
+  topRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between'
+  },
+  counter: {
+    fontSize: '28rpx',
+    lineHeight: '36rpx',
+    fontWeight: '700',
+    color: COLOR.text
+  },
+  counterUnit: {
+    fontSize: FONT.pageNo,
+    fontWeight: '400',
+    color: COLOR.secondary
+  },
+  goalBox: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'baseline'
+  },
+  goalText: {
+    fontSize: FONT.pageNo,
+    color: COLOR.secondary
+  },
+  goalNum: {
+    fontSize: '26rpx',
+    fontWeight: '700',
+    color: COLOR.text
+  },
+  goalDone: {
+    marginLeft: '12rpx',
+    fontSize: FONT.pageNo,
+    fontWeight: '600',
+    color: COLOR.warm
+  },
+  track: {
+    marginTop: '14rpx',
+    height: '4rpx',
+    borderRadius: '2rpx',
+    backgroundColor: COLOR.track
+  },
+  trackFill: {
+    height: '4rpx',
+    borderRadius: '2rpx',
+    backgroundImage: `linear-gradient(90deg, ${COLOR.progressWarmFrom} 0%, ${COLOR.progressWarmTo} 100%)`
+  },
+
+  // ---------- 卡片 ----------
+  cardArea: {
+    position: 'relative',
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    paddingTop: '28rpx',
+    paddingBottom: '28rpx'
+  },
+  card: {
+    position: 'relative',
+    overflow: 'hidden',
+    // 卡片吃掉中间剩余的所有高度（flex:1），上下留白由 cardArea 的 padding 控制 ——
+    // 这样大屏上卡片是「一大块画布」，不是浮在中间的一张小纸片
+    flex: 1,
+    minHeight: '540rpx',
+    paddingLeft: '44rpx',
+    paddingRight: '44rpx',
+    paddingTop: '36rpx',
+    paddingBottom: '40rpx',
+    borderRadius: '36rpx',
+    backgroundColor: '#FFFDFA',
+    border: `1px solid ${COLOR.warmLine}`,
+    display: 'flex',
+    flexDirection: 'column',
+    // 暖棕投影：米白底上用黑色投影会发灰
+    boxShadow: '0 18px 48px rgba(168, 112, 68, 0.10)',
+    willChange: 'transform, opacity'
+  },
+  // 没翻面：这一块吃掉卡片剩下的高度，把「词 + 音标 + 提示」作为一个整体居中
+  centerBlock: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center'
+  },
+  // 翻面后：词在上半区**自己垂直居中**（卡片底部已经用 paddingBottom 给 sheet 留了位置），
+  // 这样卡片无论多高，词都落在「sheet 上方那块空间」的正中，不会顶在卡片最上面
+  topBlock: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center'
+  },
+  // 点按钮飘出来的小 emoji：在卡片中间偏上，向上浮出画面
+  burst: {
+    position: 'absolute',
+    top: '34%',
+    left: '50%',
+    marginLeft: '-40rpx',
+    width: '80rpx',
+    textAlign: 'center',
+    fontSize: '60rpx',
+    lineHeight: '72rpx',
+    animation: 'burstUp 700ms ease-out',
+    pointerEvents: 'none',
+    zIndex: 20
+  },
+  // ---------- 释义 sheet（iOS 那种从底部浮上来的玻璃面板）----------
+  sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '320rpx',
+    paddingLeft: '40rpx',
+    paddingRight: '40rpx',
+    paddingTop: '16rpx',
+    paddingBottom: '32rpx',
+    borderTopLeftRadius: '30rpx',
+    borderTopRightRadius: '30rpx',
+    backgroundColor: 'rgba(255, 253, 250, 0.88)',
+    // 真正让它是「玻璃」的一行；不支持 backdrop-filter 的机型会退化成上面那个 .88 的半透明暖白
+    backdropFilter: 'blur(24px) saturate(180%)',
+    borderTop: `1px solid ${COLOR.warmLine}`,
+    boxShadow: '0 -10px 30px rgba(168, 112, 68, 0.09)',
+    display: 'flex',
+    flexDirection: 'column',
+    animation: 'sheetUp 320ms cubic-bezier(.22,.61,.36,1) both',
+    zIndex: 5
+  },
+  // 顶部那条「把手」：iOS sheet 的标志物，72×8rpx
+  sheetHandle: {
+    alignSelf: 'center',
+    width: '72rpx',
+    height: '8rpx',
+    borderRadius: '4rpx',
+    backgroundColor: 'rgba(60, 40, 30, 0.16)'
+  },
+  // 判定回执：22rpx 暖色小字，紧跟把手 —— 只回答一个问题「刚才那一下记成什么了」
+  verdictLine: {
+    marginTop: '14rpx',
+    fontSize: '22rpx',
+    lineHeight: '30rpx',
+    fontWeight: '600',
+    color: COLOR.warm,
+    animation: 'labelIn 180ms ease both'
+  },
+  // 内容超出就自己滚（长释义 / 长例句不会把 sheet 撑破）
+  sheetBody: {
+    flex: 1,
+    marginTop: '16rpx'
+  },
+
+  // ---------- 分段进度 ----------
+  segRow: {
+    marginTop: '16rpx',
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  seg: {
+    flex: 1,
+    height: '6rpx',
+    borderRadius: '3rpx',
+    backgroundColor: COLOR.track,
+    transition: 'background-color 260ms ease, box-shadow 260ms ease'
+  },
+  segOn: {
+    backgroundImage: `linear-gradient(90deg, ${COLOR.progressWarmFrom} 0%, ${COLOR.progressWarmTo} 100%)`
+  },
+  // 当前那一段加一圈很淡的暖色光晕，视线一眼落在「现在到哪儿」
+  segCurrent: {
+    boxShadow: '0 0 0 2rpx rgba(222, 127, 76, 0.18)'
+  },
+  chipRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  chip: {
+    height: '40rpx',
+    paddingLeft: '16rpx',
+    paddingRight: '16rpx',
+    borderRadius: '20rpx',
+    backgroundColor: COLOR.warmSoft,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  markTag: {
+    fontSize: '20rpx',
+    color: COLOR.secondary
+  },
+  markFull: {
+    fontSize: '20rpx',
+    fontWeight: '600',
+    color: COLOR.danger
+  },
+  footNote: {
+    flexShrink: 0,
+    marginRight: '16rpx',
+    fontSize: '20rpx',
+    fontWeight: '600',
+    color: COLOR.warm
+  },
+  chipText: {
+    fontSize: '20rpx',
+    lineHeight: '40rpx',
+    letterSpacing: '1rpx',
+    color: COLOR.warm
+  },
+
+  word: {
+    marginTop: '30rpx',
+    fontSize: '72rpx',
+    lineHeight: '90rpx',
+    fontWeight: '600',
+    letterSpacing: '-0.5rpx',
+    color: COLOR.text
+  },
+  wordDone: {
+    color: COLOR.wordDone
+  },
+  metaRow: {
+    marginTop: '10rpx',
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  meta: {
+    fontSize: '24rpx',
+    lineHeight: '34rpx',
+    color: COLOR.secondary
+  },
+  speak: {
+    marginLeft: '8rpx'
+  },
+  divider: {
+    marginTop: '30rpx',
+    height: '1rpx',
+    backgroundColor: COLOR.track
+  },
+  // 未翻面：一句轻提示，贴在音标下面（词整体居中，提示跟着走）
+  hint: {
+    marginTop: '26rpx',
+    fontSize: FONT.pageNo,
+    color: COLOR.secondary
+  },
+
+  // 翻面：释义 + 例句，从下往上浮出来
+  answer: {
+    marginTop: '28rpx',
+    display: 'flex',
+    flexDirection: 'column',
+    animation: 'fadeUp 320ms cubic-bezier(.22,.61,.36,1) both'
+  },
+  definition: {
+    fontSize: '34rpx',
+    lineHeight: '52rpx',
+    color: COLOR.text
+  },
+  example: {
+    marginTop: '24rpx',
+    paddingTop: '22rpx',
+    borderTop: `1px solid ${COLOR.track}`,
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  exampleEn: {
+    fontSize: '26rpx',
+    lineHeight: '40rpx',
+    color: COLOR.body
+  },
+  exampleZh: {
+    marginTop: '8rpx',
+    fontSize: '24rpx',
+    lineHeight: '34rpx',
+    color: COLOR.secondary
+  },
+  hl: {
+    color: COLOR.warm,
+    fontWeight: '600'
+  },
+
+  // ---------- 动作 ----------
+  actions: {
+    marginTop: '8rpx',
+    display: 'flex',
+    flexDirection: 'row'
+  },
+  btn: {
+    flex: 1,
+    height: '100rpx',
+    borderRadius: '50rpx',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  btnGhost: {
+    marginRight: '20rpx',
+    border: `1px solid ${COLOR.track}`,
+    backgroundColor: 'rgba(255, 253, 250, 0.9)'
+  },
+  btnGhostText: {
+    fontSize: '30rpx',
+    color: COLOR.body,
+    animation: 'labelIn 140ms ease both'
+  },
+  btnPrimary: {
+    backgroundColor: COLOR.black
+  },
+  btnPrimaryText: {
+    fontSize: '30rpx',
+    fontWeight: '600',
+    color: '#FFFFFF',
+    animation: 'labelIn 140ms ease both'
+  },
+
+  foot: {
+    marginTop: '16rpx',
+    /* 高度常驻：撤销胶囊进出不改变这一行的高度，卡片就不会被顶得上下跳 */
+    minHeight: '56rpx',
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  footLeft: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center'
+  },
+  undoPill: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '56rpx',
+    paddingLeft: '24rpx',
+    paddingRight: '24rpx',
+    marginRight: '16rpx',
+    borderRadius: '28rpx',
+    borderWidth: '1rpx',
+    borderStyle: 'solid',
+    borderColor: 'rgba(180,96,47,.30)',
+    backgroundColor: 'rgba(180,96,47,.08)'
+  },
+  undoText: {
+    fontSize: '22rpx',
+    lineHeight: '28rpx',
+    fontWeight: '600',
+    color: COLOR.warm
+  },
+  footText: {
+    fontSize: '20rpx',
+    color: COLOR.secondary
+  },
+
+  // ---------- 完成面板 ----------
+  doneArea: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    paddingTop: '28rpx',
+    paddingBottom: '28rpx'
+  },
+  // 暖白卡片：和词卡同一个底、同一条描边，像同一张纸翻到了背面
+  doneCard: {
+    borderRadius: '36rpx',
+    backgroundColor: '#FFFDFA',
+    border: `1px solid ${COLOR.warmLine}`,
+    boxShadow: '0 18px 48px rgba(168, 112, 68, 0.10)',
+    paddingLeft: '44rpx',
+    paddingRight: '44rpx',
+    paddingTop: '48rpx',
+    paddingBottom: '44rpx',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    animation: 'popIn 420ms cubic-bezier(.22,1.2,.36,1) both'
+  },
+  doneEmoji: {
+    fontSize: '96rpx',
+    lineHeight: '116rpx',
+    animation: 'floatY 3.2s ease-in-out infinite'
+  },
+  doneTitle: {
+    marginTop: '12rpx',
+    fontSize: '40rpx',
+    lineHeight: '54rpx',
+    fontWeight: '700',
+    color: COLOR.text,
+    textAlign: 'center'
+  },
+  doneStat: {
+    marginTop: '16rpx',
+    fontSize: '26rpx',
+    lineHeight: '36rpx',
+    color: COLOR.body
+  },
+  doneGoal: {
+    marginTop: '6rpx',
+    fontSize: '22rpx',
+    lineHeight: '32rpx',
+    color: COLOR.warm
+  },
+  doneAsk: {
+    marginTop: '28rpx',
+    fontSize: '26rpx',
+    lineHeight: '38rpx',
+    color: COLOR.secondary,
+    textAlign: 'center'
+  },
+  doneBtn: {
+    marginTop: '20rpx',
+    alignSelf: 'stretch',
+    height: '96rpx',
+    borderRadius: '48rpx',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  doneBtnPrimary: {
+    backgroundColor: COLOR.black
+  },
+  doneBtnPrimaryText: {
+    fontSize: '30rpx',
+    fontWeight: '600',
+    color: '#FFFFFF'
+  },
+  doneBtnGhost: {
+    border: `1px solid ${COLOR.track}`,
+    backgroundColor: 'rgba(255, 253, 250, 0.9)'
+  },
+  // 只有一颗按钮时（词背完了没得再背）它就是主按钮，不再留描边的次要感
+  doneBtnGhostSolo: {
+    marginTop: '28rpx'
+  },
+  doneBtnGhostText: {
+    fontSize: '28rpx',
+    color: COLOR.body
+  }
+}

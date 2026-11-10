@@ -1,0 +1,78 @@
+name: ios-unsigned-ipa
+
+# 产出**未签名**的 .ipa（用 Taro 的 H5 构建 + Capacitor 包一层 WKWebView 壳）。
+# 签名不在 CI 里做：免费 Apple ID 只能在有 Xcode 登录态的机器上签，
+# 拿到的未签名 ipa 用 Sideloadly / AltStore + 自己的 Apple ID 在本机签即可。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+      - 'config/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'capacitor.config.json'
+      - '.github/workflows/ios-unsigned-ipa.yml'
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Build H5 bundle
+        run: npm run build:h5
+
+      - name: Sanity check webDir
+        run: |
+          test -f dist/index.html || { echo "dist/index.html missing"; exit 1; }
+          du -sh dist
+
+      - name: Add Capacitor iOS platform
+        run: |
+          npm install --no-save @capacitor/core@6 @capacitor/ios@6 @capacitor/cli@6
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Build unsigned .app
+        run: |
+          cd ios/App
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package into .ipa
+        run: |
+          APP=$(find ios/App/build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          echo "app bundle: $APP"
+          mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          cd out
+          zip -qry wordlord-unsigned.ipa Payload
+          ls -lh wordlord-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wordlord-unsigned-ipa
+          path: out/wordlord-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30

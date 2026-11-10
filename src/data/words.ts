@@ -1,5 +1,6 @@
 import rawWords from './cet6.json'
 import frequency from './frequency.json'
+import rawExamples from './examples.json'
 
 /**
  * 六级大纲新增词（1824 词），按词频从高到低排列。
@@ -63,6 +64,49 @@ export function levelLabel(key: LevelKey): string {
 export function wordsOfLevel(words: Word[], level: LevelKey): Word[] {
   if (level === 'all') return words
   return words.filter((w) => bandOf(w.word) === level)
+}
+
+// ---------- 例句（R9）----------
+//
+// 每条词一条例句，显示在词卡释义下方。**来源必须能看出来**：
+//   `source: 'exam'` = 六级真题原句（`from` 是出处，页面标「六级真题 · 出处」）
+//   `source: 'ai'`   = AI 生成（页面标「AI 生成例句，仅供参考」）
+// 这不是可选项：用户 2026-11 的硬要求是「若用 AI 生成，必须标注」，漏了标注等于骗人。
+//
+// 数据在 `src/data/examples.json`，由 scripts/build-examples.mjs 从分片合并而来
+// （词表是另一条生产线，两者各自重跑互不干扰）；运行时只有 `exampleOf()` 一个入口。
+
+export interface Example {
+  en: string
+  zh: string
+  source: 'exam' | 'ai'
+  /** 真题出处（'2019.06 阅读'）；AI 生成的是空串 */
+  from: string
+}
+
+/**
+ * word -> [en, zh, from?]；第三项在 = 真题，缺 = AI 生成。
+ *
+ * ⚠️ 这一层 `words` 不能省：词表里有个词就叫 `default`，如果把它摊在 JSON 顶层，
+ * CommonJS 产物里的 `require('./examples.json').default` 拿到的会是**那个词的例句**，
+ * 而不是整张表（`import x from ...` 会被编成 `.default`）—— 症状是所有词都查不到例句。
+ * 见 scripts/build-examples.mjs 的 merge() 和 p0-check 的 R9 断言。
+ */
+const EXAMPLES = (rawExamples as unknown as { words?: Record<string, string[]> }).words ?? {}
+
+/**
+ * 取一个词的例句。没有就返回 null —— 页面**不占位也不编**，
+ * 少一行例句比编一句假例句好（上传的词表本来就只保证四个字段）。
+ */
+export function exampleOf(word: string): Example | null {
+  const row = EXAMPLES[String(word || '').toLowerCase()]
+  if (!Array.isArray(row) || !row[0]) return null
+  return { en: row[0], zh: row[1] || '', source: row[2] ? 'exam' : 'ai', from: row[2] || '' }
+}
+
+/** 例句来源标注文案。AI 生成的一律带「仅供参考」，这是 R9 的硬要求。 */
+export function exampleSourceLabel(e: Example): string {
+  return e.source === 'exam' ? `六级真题${e.from ? ` · ${e.from}` : ''}` : 'AI 生成例句，仅供参考'
 }
 
 // ---------- 词书 ----------

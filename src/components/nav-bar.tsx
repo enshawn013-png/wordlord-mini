@@ -43,7 +43,13 @@ export function NavBar({ title, back, big }: { title: string; back?: boolean; bi
           {/* 紧凑栏：只放返回箭头，和大标题分开两行（iOS 大标题页就是这个结构） */}
           {back ? (
             <View style={styles.bigBackRow}>
-              <View {...PRESS} style={STYLE.navBack} onClick={goBack}>
+              <View
+                {...PRESS}
+                aria-role="button"
+                aria-label="返回"
+                style={STYLE.navBack}
+                onClick={goBack}
+              >
                 <Text style={STYLE.navBackIcon}>‹</Text>
               </View>
             </View>
@@ -64,7 +70,14 @@ export function NavBar({ title, back, big }: { title: string; back?: boolean; bi
           }}
         >
           {back ? (
-            <View {...PRESS} style={STYLE.navBack} onClick={goBack}>
+            // 箭头本身是一个「‹」字符，读屏用户看不出它是什么，所以补一句 aria-label
+            <View
+              {...PRESS}
+              aria-role="button"
+              aria-label="返回"
+              style={STYLE.navBack}
+              onClick={goBack}
+            >
               <Text style={STYLE.navBackIcon}>‹</Text>
             </View>
           ) : null}

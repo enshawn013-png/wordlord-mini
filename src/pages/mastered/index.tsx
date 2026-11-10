@@ -2,9 +2,12 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { ScrollView, Text, View } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
+import { PageCurtain } from '../../components/page-curtain'
 import { NavBar } from '../../components/nav-bar'
 import { PagerBar, pagerBarHeightPx } from '../../components/pager-bar'
 import { TabBar } from '../../components/tab-bar'
+import { PageHeader } from '../../components/page-header'
+import { Stripe } from '../../components/stripe'
 import { PAGE_SIZE } from '../../data/words'
 import {
   getCurrentPage,
@@ -66,7 +69,8 @@ export default function MasteredScreen() {
     // 撤回 = 这个词回到翻书列表（标记次数不回补，见 storage.masterWord 的说明）
     unmasterWord(word)
     refresh()
-    Taro.showToast({ title: '已撤回，这个词回到翻书列表', icon: 'none', duration: 2000 })
+    // 短提示：列表里那一行当场就没了，页面本身的静态说明已经写清「撤回」是什么意思
+    Taro.showToast({ title: '已撤回', icon: 'none', duration: 1500 })
   }
 
   const navH = navBarHeightPx()
@@ -75,6 +79,7 @@ export default function MasteredScreen() {
 
   return (
     <View style={STYLE.container}>
+      <PageCurtain label="已掌握" kicker="MASTERED" />
       {totalPages === 0 ? (
         // 空状态不进滚动区：靠 STYLE.empty 的 flex:1 在整屏里居中
         <View style={{ ...STYLE.empty, paddingBottom: `${bodyBottom}px` }}>
@@ -92,7 +97,9 @@ export default function MasteredScreen() {
               paddingBottom: `${bodyBottom + rpxToPx(16)}px`
             }}
           >
-            <View style={styles.statsBar}>
+            <PageHeader kicker="MASTERED" title="已掌握" sub="已经拿下的词，随时可以撤回" />
+            <Stripe tone="red" height={22} />
+<View style={styles.statsBar}>
               <Text style={styles.statsText}>
                 第 {page + 1} / {totalPages} 页 · 共 {list.length} 个已掌握单词
               </Text>
@@ -103,10 +110,16 @@ export default function MasteredScreen() {
               </Text>
             </View>
 
-            {list.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE).map((item) => {
+            {list.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE).map((item, rowIndex) => {
               const meta = [item.phonetic, item.pos].filter(Boolean).join('  ')
               return (
-                <View key={item.word} className="glass glass-card" style={styles.row}>
+                <View
+                  key={item.word}
+                  style={{
+                    ...styles.row,
+                    animation: `fadeUp 460ms cubic-bezier(.22,1,.36,1) ${rowIndex * 45}ms backwards`
+                  }}
+                >
                   <View style={styles.rowText}>
                     {/* text-break：自传词表的词条/释义可能是没有空格的长串，不许顶出卡片 */}
                     <Text className="text-break" style={styles.word}>
@@ -152,26 +165,28 @@ const styles: Record<string, CSSProperties> = {
   },
   statsText: {
     fontSize: FONT.meta,
-    color: COLOR.secondary
+    color: COLOR.onGroundSoft
   },
   hintText: {
     marginTop: '8rpx',
     fontSize: FONT.pageNo,
     lineHeight: '32rpx',
-    color: COLOR.secondary
+    color: COLOR.onGroundSoft
   },
   // 和生词本的行同一套：玻璃卡片、左右各 32rpx 边、行间 16rpx 缝、卡片内边距上下各 32rpx
+  // 词条不再装进白框：直接排在橙底上，只用一条细线分隔（杂志索引的做法）
   row: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: PAGE_PAD,
-    marginRight: PAGE_PAD,
-    marginTop: '16rpx',
-    paddingLeft: '32rpx',
-    paddingRight: '32rpx',
-    paddingTop: '32rpx',
-    paddingBottom: '32rpx'
+    marginLeft: '0rpx',
+    marginRight: '0rpx',
+    marginTop: '0rpx',
+    paddingLeft: '36rpx',
+    paddingRight: '36rpx',
+    paddingTop: '24rpx',
+    paddingBottom: '24rpx',
+    borderBottom: '2rpx solid rgba(23, 21, 15, 0.16)'
   },
   rowText: {
     flex: 1,
@@ -181,26 +196,32 @@ const styles: Record<string, CSSProperties> = {
   word: {
     fontSize: FONT.word,
     fontWeight: '700',
-    color: COLOR.text
+    color: COLOR.onGround
   },
   meta: {
     marginTop: '10rpx',
     fontSize: FONT.meta,
-    color: COLOR.secondary
+    color: COLOR.onGroundSoft
   },
   definition: {
     marginTop: '10rpx',
     fontSize: FONT.definition,
-    color: COLOR.body
+    color: COLOR.onGroundSoft
   },
+  // 「撤回」是个纯文字链接（没有底色），所以可以直接把内边距撑到 88rpx 热区，
+  // 再用负外边距还回布局 —— 视觉不变，手指好点
   revokeLink: {
     flexShrink: 0,
     marginLeft: '24rpx',
-    paddingTop: '8rpx',
-    paddingBottom: '8rpx'
+    marginTop: '-32rpx',
+    marginBottom: '-32rpx',
+    paddingTop: '32rpx',
+    paddingBottom: '32rpx',
+    paddingLeft: '8rpx'
   },
   revokeLinkText: {
-    fontSize: FONT.meta,
-    color: COLOR.dangerText
+    color: COLOR.onGround,
+    textDecorationLine: 'underline',
+    fontSize: FONT.meta
   }
 }

@@ -46,7 +46,7 @@ const pillBase: CSSProperties = {
   paddingBottom: '8rpx',
   paddingLeft: '20rpx',
   paddingRight: '20rpx',
-  borderRadius: '24rpx'
+  borderRadius: '6rpx'
 }
 
 export function MasterPill({

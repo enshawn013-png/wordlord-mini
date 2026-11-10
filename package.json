@@ -8,7 +8,9 @@
     "build:h5": "taro build --type h5",
     "dev:weapp": "npm run build:weapp -- --watch",
     "dev:h5": "npm run build:h5 -- --watch",
-    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "clean:h5": "node -e \"['dist/js','dist/css','dist/index.html'].forEach(p=>require('fs').rmSync(p,{recursive:true,force:true}))\"",
+    "preview:pkg": "npm run build:weapp && node scripts/sync-preview.mjs"
   },
   "browserslist": [
     "defaults and fully supports es6-module",
@@ -26,6 +28,8 @@
     "@tarojs/runtime": "4.2.1",
     "@tarojs/shared": "4.2.1",
     "@tarojs/taro": "4.2.1",
+    "jszip": "^3.10.2",
+    "pako": "^3.0.3",
     "react": "^18.0.0",
     "react-dom": "^18.0.0"
   },
@@ -40,6 +44,7 @@
     "@tarojs/webpack5-runner": "4.2.1",
     "@types/minimatch": "^5",
     "@types/node": "^18",
+    "@types/pako": "^2.0.4",
     "@types/react": "^18.0.0",
     "@types/webpack-env": "^1.13.6",
     "babel-preset-taro": "4.2.1",

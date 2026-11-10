@@ -1,0 +1,14 @@
+{
+  "appId": "com.shawn.wordlord",
+  "appName": "单词君",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#F7F6F2",
+    "limitsNavigationsToAppBoundDomains": false
+  },
+  "server": {
+    "iosScheme": "capacitor"
+  }
+}

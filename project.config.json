@@ -13,7 +13,7 @@
     "minified": false,
     "compileWorklet": false,
     "uglifyFileName": false,
-    "uploadWithSourceMap": true,
+    "uploadWithSourceMap": false,
     "packNpmManually": false,
     "packNpmRelationList": [],
     "minifyWXSS": true,
@@ -33,9 +33,21 @@
     "wxext14566970e7e9f62": "2.27.3"
   },
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      { "type": "folder", "value": ".worddata" },
+      { "type": "folder", "value": ".swc" },
+      { "type": "folder", "value": ".vscode" },
+      { "type": "folder", "value": "src" },
+      { "type": "folder", "value": "p0-check" },
+      { "type": "folder", "value": "scripts" },
+      { "type": "folder", "value": "config" },
+      { "type": "folder", "value": "types" },
+      { "type": "folder", "value": "cloudfunctions" },
+      { "type": "file", "value": "package-lock.json" },
+      { "type": "file", "value": "tsconfig.json" },
+      { "type": "suffix", "value": ".md" }
+    ],
     "include": []
   },
-  "editorSetting": {},
-  "projectArchitecture": "multiPlatform"
+  "editorSetting": {}
 }
