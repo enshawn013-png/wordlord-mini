@@ -889,7 +889,9 @@ const styles: Record<string, CSSProperties> = {
    */
   h5Wrap: {
     flex: 1,
-    paddingTop: '64rpx',
+    // 96rpx（不是微信端的 64rpx）：H5 里「翻书」胶囊和「1/34」都在顶部，
+    // 64rpx 时两者会叠在一起（实测胶囊 84–114px，计数行 104–128px）
+    paddingTop: '96rpx',
     backgroundColor: COLOR.teal,
     display: 'flex',
     flexDirection: 'column'
