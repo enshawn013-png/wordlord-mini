@@ -266,8 +266,8 @@ export default function SettingsScreen() {
             </View>
             <View style={{ marginTop: '6rpx' }}>
               <BigAction
-                label={importing ? '正在解析' : '从聊天记录选文件'}
-                meta="选完自动建一本词书"
+                label={importing ? '正在解析' : '选择词书文件'}
+                meta="本地文件 / 聊天记录都行，选完自动建一本词书"
                 onTap={startImport}
               />
             </View>
