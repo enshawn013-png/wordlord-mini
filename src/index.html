@@ -2,7 +2,10 @@
 <html>
 <head>
   <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
-  <meta content="width=device-width,initial-scale=1,user-scalable=no" name="viewport">
+  <!-- viewport-fit=cover 是 iPhone 全面屏（灵动岛 / Home 条）的前提：
+       不写它，H5 里 env(safe-area-inset-*) 全是 0，导航栏会钻到灵动岛底下 -->
+  <meta content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover" name="viewport">
+  <meta name="theme-color" content="#123129">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-touch-fullscreen" content="yes">
   <meta name="format-detection" content="telephone=no,address=no">
