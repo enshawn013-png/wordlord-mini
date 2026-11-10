@@ -1,4 +1,5 @@
 import Taro from '@tarojs/taro'
+import { pickFile } from './file-pick'
 import { Word } from '../data/words'
 import { MAX_UPLOAD_WORDS } from '../store/storage'
 import { wordsFromCsv } from './csv'
@@ -25,6 +26,8 @@ import { addUploadBook, UploadBookMeta } from '../store/storage'
 
 /** 支持从聊天记录里选的扩展名 */
 const PICK_EXTENSIONS = ['docx', 'txt', 'csv', 'tsv', 'md', 'pdf', 'doc']
+/** 浏览器 input[type=file] 的 accept，和上面的扩展名一一对应 */
+const PICK_ACCEPT = '.docx,.pdf,.txt,.csv,.tsv,.md,text/plain,text/csv,application/pdf'
 
 const HEADER_WORDS = ['word', '单词', 'headword', 'english', '英文', '词汇']
 
@@ -174,15 +177,6 @@ function docxXmlToText(xml: string): string {
   )
 }
 
-async function readArrayBuffer(filePath: string): Promise<ArrayBuffer> {
-  return new Promise((resolve, reject) => {
-    Taro.getFileSystemManager().readFile({
-      filePath,
-      success: (r) => resolve(r.data as ArrayBuffer),
-      fail: (e) => reject(new Error(e.errMsg || '读取文件失败'))
-    })
-  })
-}
 
 // ---------------- pdf（尽力而为） ----------------
 
@@ -298,15 +292,8 @@ function showFormatModal(title: string, content: string): void {
  * 这是「各种文件 → 词书」的唯一入口，格式路由都在这里面。
  */
 export async function importAnyFile(): Promise<ImportResult2 | null> {
-  let picked: { path: string; name: string } | null = null
-  try {
-    const res = await Taro.chooseMessageFile({ count: 1, type: 'file', extension: PICK_EXTENSIONS })
-    const file = res.tempFiles?.[0]
-    if (!file) return null
-    picked = { path: file.path, name: file.name || '' }
-  } catch {
-    return null
-  }
+  // 微信走聊天记录选文件，H5 / iOS 壳走系统文件选择器（见 utils/file-pick.ts）
+  const picked = await pickFile(PICK_ACCEPT, PICK_EXTENSIONS)
   if (!picked) return null
 
   const ext = (picked.name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase()
@@ -318,7 +305,7 @@ export async function importAnyFile(): Promise<ImportResult2 | null> {
     if (ext === 'docx') {
       const mod = require('jszip') as { default: new (b: ArrayBuffer) => { file: (n: string) => { async: (t: string) => Promise<string> } } }
       const JSZip = mod.default || (mod as unknown as new (b: ArrayBuffer) => { file: (n: string) => { async: (t: string) => Promise<string> } })
-      const buf = await readArrayBuffer(picked.path)
+      const buf = await picked.readArrayBuffer()
       const zip = new JSZip(buf)
       const entry = zip.file('word/document.xml')
       if (!entry) throw new Error('这个 docx 里读不到正文')
@@ -333,7 +320,7 @@ export async function importAnyFile(): Promise<ImportResult2 | null> {
       )
       return null
     } else if (ext === 'pdf') {
-      const bytes = new Uint8Array(await readArrayBuffer(picked.path))
+      const bytes = new Uint8Array(await picked.readArrayBuffer())
       const streams = inflateStreams(bytes)
       text = streams.map(pdfStreamToText).filter(Boolean).join('\n')
       if (!pdfExtractQuality(text)) {
@@ -346,14 +333,7 @@ export async function importAnyFile(): Promise<ImportResult2 | null> {
       }
     } else {
       // txt / csv / tsv / md：读文本
-      text = await new Promise<string>((resolve, reject) => {
-        Taro.getFileSystemManager().readFile({
-          filePath: picked!.path,
-          encoding: 'utf8',
-          success: (r) => resolve(String(r.data)),
-          fail: (e) => reject(new Error(e.errMsg || '读取文件失败'))
-        })
-      })
+      text = await picked.readText()
       if (text.includes('�')) {
         Taro.hideLoading()
         showFormatModal(
