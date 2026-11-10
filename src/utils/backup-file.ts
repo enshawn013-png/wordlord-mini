@@ -1,5 +1,6 @@
 import Taro from '@tarojs/taro'
 import { exportBackup, inspectBackup } from '../store/storage'
+import { pickFile } from './file-pick'
 
 /**
  * 一键导出「进度 + 全部学习数据」成一个 JSON 文件。
@@ -123,20 +124,13 @@ export function describeBackupResult(r: BackupFileResult): string {
  * 只挑 `.json`（`extension` 只是筛选建议，真伪仍由 `inspectBackup` 判定）。
  */
 export async function pickBackupFile(): Promise<{ json: string; name: string } | null> {
-  let picked: { path: string; name: string } | null = null
+  // H5 / iOS 壳里没有 chooseMessageFile，统一走 file-pick（浏览器 input[type=file]）
+  const picked = await pickFile('.json,application/json', ['json'])
+  if (!picked) return null
   try {
-    const res = await Taro.chooseMessageFile({ count: 1, type: 'file', extension: ['json'] })
-    const f = res.tempFiles?.[0]
-    if (!f) return null
-    picked = { path: f.path, name: f.name || 'wordlord-backup.json' }
-  } catch {
-    // 用户点了取消 / 基础库不支持：都按"没选"处理，不要弹错误
-    return null
-  }
-  try {
-    const json = Taro.getFileSystemManager().readFileSync(picked.path, 'utf8')
-    return { json: String(json), name: picked.name }
+    return { json: await picked.readText(), name: picked.name }
   } catch {
     return null
   }
 }
+
