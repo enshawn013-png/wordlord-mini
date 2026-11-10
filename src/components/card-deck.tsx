@@ -502,7 +502,7 @@ export function CardDeck({
         ? `今天的 ${todayTarget} 个背完了`
         : `这一批 ${total} 个背完了`
     return (
-      <View style={styles.wrap}>
+      <View style={process.env.TARO_ENV === 'h5' ? styles.h5Wrap : styles.wrap}>
         <View style={styles.doneArea}>
           <View style={styles.doneCard}>
             <Text style={styles.doneEmoji}>{bonus ? '§' : '✓'}</Text>
@@ -572,7 +572,7 @@ export function CardDeck({
 
   // ---------------- 卡片 ----------------
   return (
-    <View style={styles.wrap}>
+    <View style={process.env.TARO_ENV === 'h5' ? styles.h5Wrap : styles.wrap}>
       {/* ── 顶部：位置 + 今日进度（扇贝那根细进度条的位置） ── */}
       <View style={styles.topRow}>
         <Text style={styles.counter}>
@@ -606,7 +606,7 @@ export function CardDeck({
         ) : null}
         <View
           style={{
-            ...styles.card,
+            ...(process.env.TARO_ENV === 'h5' ? styles.h5Card : styles.card),
             // 翻面后底部要留出 sheet 的位置：sheet 是 fixed 高度的绝对定位块，
             // 不留这 320rpx 的话卡片会缩成一条，sheet 就叠在词上了
             ...(revealed ? { paddingBottom: '320rpx' } : null),
@@ -880,9 +880,42 @@ function highlight(sentence: string, word: string) {
 }
 
 const styles: Record<string, CSSProperties> = {
+  /**
+   * H5 / iOS 壳专用的卡片根节点：同一块深绿面板，但**不吃负外边距**。
+   *
+   * 微信里父容器有 36rpx 内边距，负外边距正好抵消，做出「出血」；
+   * H5 里父容器本身满宽，负外边距只会把内容顶出屏幕（实测 427 > 视口 390），
+   * 右边的「认识」按钮就被切掉几像素。这里在 H5 下把手脚放平（见 wrap 的注释）。
+   */
+  h5Wrap: {
+    flex: 1,
+    paddingTop: '64rpx',
+    backgroundColor: COLOR.teal,
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  /** H5 版卡片：去掉 -36rpx 出血，宽度跟着父容器走 */
+  h5Card: {
+    position: 'relative',
+    overflow: 'hidden',
+    flex: 1,
+    minHeight: '540rpx',
+    paddingLeft: '44rpx',
+    paddingRight: '44rpx',
+    paddingTop: '32rpx',
+    paddingBottom: '28rpx',
+    borderRadius: '0rpx',
+    backgroundColor: COLOR.teal,
+    display: 'flex',
+    flexDirection: 'column',
+    boxShadow: '0 24rpx 56rpx rgba(9, 28, 25, 0.26), 0 4rpx 10rpx rgba(9, 28, 25, 0.10)',
+    willChange: 'transform, opacity'
+  },
   wrap: {
     flex: 1,
     // 顶到屏幕左右边，整块是深绿面板：和首页同一块底
+    // ⚠️ H5 里父容器就是满宽，负外边距会把整块顶出屏幕（宽 427 > 视口 390），
+    // 右边缘的「认识」按钮被切 4px —— 所以在 H5 下改用 h5Wrap（见下）
     marginLeft: '-36rpx',
     marginRight: '-36rpx',
     paddingLeft: '36rpx',
