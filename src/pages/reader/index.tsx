@@ -376,7 +376,14 @@ export default function ReaderScreen() {
   const bodyTop = navH + rpxToPx(todayPillH + 24)
 
   return (
-    <View style={STYLE.container}>
+    // H5 / iOS 壳：卡片用 -36rpx 负外边距做「满屏出血」，微信里页面会自动裁掉
+    // 溢出的那 36rpx，H5 不裁 —— 于是右边缘会多出一点点、把「认识」按钮切掉 4px。
+    // 这里在 H5 下显式裁一次，表现和微信一致。
+    <View
+      style={
+        process.env.TARO_ENV === 'h5' ? { ...STYLE.container, overflow: 'hidden' } : STYLE.container
+      }
+    >
       <PageCurtain label="背单词" kicker="STUDY SESSION" />
       {totalPages === 0 ? (
         /*
