@@ -18,7 +18,8 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    # macos-14 在这个账号的套餐里会解析成 arm64 XL（不支持），用 Intel 的 macos-13
+    runs-on: macos-13
     timeout-minutes: 40
 
     steps:
