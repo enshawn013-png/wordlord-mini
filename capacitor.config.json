@@ -4,11 +4,13 @@
   "webDir": "dist",
   "bundledWebRuntime": false,
   "ios": {
-    "contentInset": "always",
-    "backgroundColor": "#F7F6F2",
-    "limitsNavigationsToAppBoundDomains": false
+    "contentInset": "never",
+    "backgroundColor": "#123129",
+    "limitsNavigationsToAppBoundDomains": false,
+    "scrollEnabled": true
   },
   "server": {
     "iosScheme": "capacitor"
-  }
+  },
+  "backgroundColor": "#123129"
 }
