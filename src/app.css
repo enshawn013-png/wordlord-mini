@@ -1,3 +1,8 @@
+/* 全局底色：iOS 壳里状态栏/安全区露出的部分是这块深绿，不是白 */
+html, body {
+  background-color: #123129;
+}
+
 /* WORDLORD / 孔版手帐：奶油纸、深墨、朱砂。 */
 
 button::after {
